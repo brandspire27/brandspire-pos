@@ -1,0 +1,8 @@
+# Copy these three lines into apps/android/gradle.properties.
+# SUPABASE_ANON_KEY is a publishable client key. NEVER put the service-role key here.
+BRANDSPIRE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+BRANDSPIRE_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
+
+# Android emulator -> Windows host localhost
+BRANDSPIRE_API_BASE_URL=http://10.0.2.2:3001
+# For a real Android phone on the same Wi-Fi, replace 10.0.2.2 with your computer's LAN IP.

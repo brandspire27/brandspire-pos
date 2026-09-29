@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="brandspire_bg">#F6F8FC</color>
+    <color name="brandspire_surface">#FFFFFF</color>
+    <color name="brandspire_ink">#0B1426</color>
+    <color name="brandspire_blue">#2D53DB</color>
+    <color name="brandspire_blue_bright">#4269E8</color>
+    <color name="brandspire_navy">#0A162A</color>
+    <color name="brandspire_muted">#616D84</color>
+</resources>

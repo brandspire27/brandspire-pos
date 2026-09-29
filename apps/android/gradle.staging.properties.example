@@ -1,0 +1,5 @@
+# Copy these three entries into apps/android/gradle.properties when building a staging APK.
+# Never put service-role or Cashfree secret keys in Android.
+BRANDSPIRE_SUPABASE_URL=https://YOUR_STAGING_PROJECT.supabase.co
+BRANDSPIRE_SUPABASE_ANON_KEY=YOUR_STAGING_ANON_KEY
+BRANDSPIRE_API_BASE_URL=https://YOUR-STAGING-API.example.com

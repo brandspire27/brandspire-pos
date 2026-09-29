@@ -1,0 +1,5 @@
+# Copy these values into your local apps/android/gradle.properties for a release build.
+# NEVER put Supabase service-role or Cashfree secrets in Android.
+BRANDSPIRE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+BRANDSPIRE_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
+BRANDSPIRE_API_BASE_URL=https://api.brandspire.tech

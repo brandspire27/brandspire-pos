@@ -1,0 +1,62 @@
+import Link from 'next/link';
+
+const sections = [
+  ['1. About Brandspire POS', 'Brandspire POS is a billing, point-of-sale and business-management software product developed and provided by Brandspire. It may support billing, GST-ready invoices, customer and product management, inventory, payments, receipt printing, A4 invoice printing, reports, Staff operations and other supported business functions.'],
+  ['2. Owner Registration', 'Owners must provide accurate and complete registration information. False, misleading or fraudulent information may result in rejection, suspension or termination of the Brandspire POS account.'],
+  ['3. Admin Approval', 'Creating an Owner account does not automatically provide full access. Registration information is reviewed through the Brandspire Admin Portal. The Brandspire Admin Team may approve or reject the application, request information, verify the email or User ID, activate a trial or paid subscription, define the start and expiry dates, extend or renew access, suspend access where permitted, and restore access after payment, renewal or account resolution.'],
+  ['4. Account Approval Status', 'After registration, the Owner may see: “Application received! The Brandspire Team is reviewing your Brandspire POS account. You’ll be able to start once your account is approved.” Approval remains subject to verification and applicable commercial requirements.'],
+  ['5. Account Credentials', 'The Owner is responsible for protecting login credentials. Staff should use individual accounts. Suspected unauthorized access should be reported to the Brandspire Team promptly.'],
+  ['6. Free Trial', 'Brandspire may offer eligible Owners a limited free trial. The duration is determined by the Brandspire Admin Team and displayed in Brandspire POS. A trial does not create a permanent right to use the service and access may be restricted when it expires unless an eligible paid subscription is activated.'],
+  ['7. Security Deposit for Printer During Free Trial', 'If Brandspire provides physical equipment during a free trial, a refundable security deposit may be required. Deductions may apply for damage caused by misuse or negligence, unauthorized modification, missing parts, loss, theft while under the Owner’s responsibility, failure to return the printer, or damage caused by use contrary to provided instructions. Normal manufacturing defects and reasonable wear and tear should not automatically result in forfeiture.'],
+  ['8. Printer Ownership', 'Unless sold under a separate written purchase arrangement, a printer supplied by Brandspire remains Brandspire property. Temporary possession does not transfer ownership. The Owner must not sell, transfer, permanently lend without authorization, modify, remove identifying information from, or intentionally damage the device.'],
+  ['9. Printer Support', 'Brandspire POS is designed for compatible 2-inch thermal printers, 3-inch thermal printers and A4 invoice printing. Compatibility depends on model, Bluetooth or USB support, Android and operating-system compatibility, drivers, ESC/POS compatibility, connection method and hardware configuration. Brandspire cannot guarantee every printer model in the market.'],
+  ['10. Printer Use', 'Brandspire-provided equipment must be used responsibly for its intended purpose. The Owner should take reasonable care against physical, water and electrical damage, unauthorized opening or repair, intentional damage, loss and theft.'],
+  ['11. Minimum Subscription Period', 'Where a Brandspire-provided printer forms part of the arrangement, the Owner may be required to maintain the minimum subscription duration communicated before activation. The duration may vary by plan, commercial agreement, printer arrangement, promotion or trial conditions.'],
+  ['12. Printer Return After Subscription', 'Where the printer remains Brandspire property, it must be returned within the communicated return period when required by the subscription arrangement, in proper working condition with supplied accessories and without avoidable damage or unauthorized modifications, subject to reasonable normal wear.'],
+  ['13. Damaged, Lost or Non-Returned Printer', 'Brandspire may charge reasonable repair or replacement costs if Brandspire-owned equipment is lost, not returned, deliberately damaged, damaged by negligence or misuse, returned with essential parts missing, or damaged beyond economical repair because of actions attributable to the Owner. A lost, non-returned or irreparably damaged printer may be charged up to the reasonable replacement cost of an equivalent new printer.'],
+  ['14. Subscription Access', 'Brandspire POS is subscription-based. A subscription may specify plan name, fee, start and expiry dates, billing period, minimum duration, included features, usage limits, printer arrangement, security-deposit requirements, renewal conditions and other applicable terms.'],
+  ['15. Subscription Activation', 'A subscription becomes active only after applicable Admin approval, payment, verification and commercial requirements are completed. The Brandspire Admin Team may approve the subscription timeline.'],
+  ['16. Subscription Status', 'Brandspire POS may show Pending Approval, Trial, Active, Expiring Soon, Grace Period, Expired, Suspended or Cancelled. The Owner should be able to identify the current account status clearly.'],
+  ['17. Subscription Expiry', 'Brandspire may notify the Owner before expiry. If renewal does not occur within the applicable subscription or grace period, paid functionality may be restricted. Valid business records should not be intentionally deleted solely because a subscription expires, except where permitted or required by applicable data-retention rules and law.'],
+  ['18. Subscription Renewal', 'Eligible subscriptions may be renewed according to plans offered by Brandspire. The renewed timeline is recorded after successful processing and approval.'],
+  ['19. Subscription Suspension', 'The Brandspire Admin Team may restrict an account where reasonably necessary because of expiry, non-payment, fraud, security concerns, material breach, platform abuse, unauthorized access, printer misuse or failure to comply with applicable subscription obligations.'],
+  ['20. Staff Access', 'Staff access exists under the Owner’s business account and may be restricted if the business subscription becomes inactive. Staff permissions are intentionally limited. Staff normally may add customers, search customers for billing, add products, search products for billing, create bills and view limited operational billing information where permitted.'],
+  ['21. Owner Responsibility for Staff', 'The Owner is responsible for managing Staff accounts and deactivating access when a person is no longer authorized. Staff activity may be recorded in audit logs for security, accountability, fraud prevention, operational records and support.'],
+  ['22. Billing and Invoice Responsibility', 'Brandspire POS assists with billing and related operations, but the Owner remains responsible for verifying product prices, tax rates, GST information, GSTIN, HSN/SAC, customer and business details, discounts, payment information, invoice information and statutory or accounting information before finalizing invoices.'],
+  ['23. GST and Tax Information', 'GST-ready features may include CGST, SGST, IGST, GST rates, HSN/SAC and tax-inclusive or tax-exclusive pricing. Brandspire POS is a software tool and does not provide tax, accounting, financial or legal advice.'],
+  ['24. Business Data', 'Subject to applicable law and these Terms, business information created or uploaded by the Owner remains the Owner’s business data. Brandspire may process it as reasonably necessary to operate, maintain, secure and support Brandspire POS, prevent fraud and abuse, and improve system performance and reliability.'],
+  ['25. Data and Privacy', 'Brandspire may process business and customer information required to provide Brandspire POS and should apply reasonable technical and organizational security measures. The Owner is responsible for ensuring that personal information entered into the platform has been lawfully obtained and used for legitimate business purposes.'],
+  ['26. Service Availability', 'Brandspire POS is designed to be natural, clean, smooth, simple and fast, but uninterrupted availability cannot be guaranteed. Internet, hosting, infrastructure, maintenance, payment-provider, printer, device, operating-system, third-party service, security or other events may temporarily affect availability.'],
+  ['27. Language Support', 'Brandspire POS may support English, Hindi and Hinglish. Translations improve usability. Where translated interface text conflicts with these English Terms, the English Terms are the primary version subject to applicable law.'],
+  ['28. Prohibited Use', 'Owners must not conduct unlawful activity, attempt unauthorized access, access another business’s data, interfere with Brandspire systems, circumvent trial, subscription or suspension controls, fraudulently manipulate payments, distribute malware, abuse infrastructure, intentionally damage equipment, seek unauthorized Admin privileges or misuse Brandspire intellectual property.'],
+  ['29. Account Termination', 'Ending a Brandspire POS subscription does not remove valid outstanding obligations involving Brandspire-owned printers or equipment, unpaid subscription charges, equipment damage, missing equipment, security-deposit adjustments or applicable replacement costs.'],
+  ['30. Changes to Plans and Pricing', 'Brandspire may introduce, modify, replace or discontinue plans and features. Applicable pricing, duration, included features and conditions should be communicated during selection, activation, renewal or plan changes and should not be applied in a misleading undisclosed manner.'],
+  ['31. Changes to These Terms', 'The Brandspire Team may update these Terms when reasonably necessary because of product, subscription, printer, payment, legal, security, privacy, technology or business-operation changes. Material updates should be communicated where required and Terms versions should include an effective date or version identifier.'],
+  ['32. Support', 'Owners may contact the Brandspire Team for assistance with account approval, verification, login, trial activation, subscription activation or renewal, expiry, suspension, printers, returns, security deposits, billing, payments, technical issues and account restoration.'],
+  ['33. Acceptance of Terms', 'Before first-time Owner registration, the Owner must actively accept these Terms. The system should record the Terms version, acceptance timestamp, User ID, Organization ID when available and relevant audit information. Selecting “I Agree & Submit Application” confirms acceptance and submits the registration for Brandspire Admin Team review.'],
+  ['34. Brand Relationship', 'Brandspire refers to the company, brand or team providing the software solution and related services. Brandspire POS refers specifically to the billing, point-of-sale and business-management software product. Brandspire Team refers to support and operational personnel. Brandspire Admin Team refers to authorized personnel handling account approval, trials, subscriptions, timelines, suspension, renewal and restoration.']
+];
+
+export default function TermsPage() {
+  return (
+    <main className="shell">
+      <div className="terms">
+        <Link className="back-link" href="/auth/signup">← Back to signup</Link>
+        <article className="card">
+          <div className="brand">Brandspire POS <small>A Brandspire Product</small></div>
+          <h1>Owner Terms & Conditions</h1>
+          <p><b>Last Updated:</b> 27 August 2026</p>
+          <p>These Terms govern registration, trial, subscription, access and use of Brandspire POS and any printer or equipment provided by Brandspire. By registering, accepting these Terms, starting a trial, purchasing a subscription or using Brandspire POS, you confirm that you have read, understood and agreed to them.</p>
+          {sections.map(([title, text]) => (
+            <section key={title}>
+              <h2>{title}</h2>
+              <p>{text}</p>
+            </section>
+          ))}
+          <hr style={{ border: 0, borderTop: '1px solid #e4e7ec', margin: '34px 0' }} />
+          <p><b>Brandspire POS — Simple Billing. Smarter Business.</b><br />A Brandspire Product</p>
+        </article>
+      </div>
+    </main>
+  );
+}

@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
+
+    <application
+        android:allowBackup="false"
+        android:hardwareAccelerated="true"
+        android:label="Brandspire POS"
+        android:supportsRtl="true"
+        android:usesCleartextTraffic="true"
+        android:theme="@style/Theme.BrandspirePOS">
+
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="barcode_ui" />
+
+        <activity android:name=".ui.NotificationCenterActivity" android:exported="false" />
+        <activity android:name=".ui.SyncCenterActivity" android:exported="false" />
+        <activity android:name=".ui.DuesPaymentsActivity" android:exported="false" />
+        <activity android:name=".ui.InventoryManageActivity" android:exported="false" />
+        <activity android:name=".ui.OwnerReportsActivity" android:exported="false" />
+        <activity android:name=".ui.CustomerLedgerActivity" android:exported="false" />
+        <activity android:name=".ui.BillSuccessActivity" android:exported="false" />
+        <activity android:name=".ui.ReceiptPreviewActivity" android:exported="false" />
+        <activity android:name=".ui.BillsActivity" android:exported="false" />
+        <activity android:name=".ui.CustomersActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".ui.ProductsActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".ui.CreateBillActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".ui.PrinterSetupActivity" android:exported="false" />
+        <activity android:name=".ui.OfflineHelpActivity" android:exported="false" />
+        <activity android:name=".ui.HomeActivity" android:exported="false" />
+        <activity android:name=".ui.LoginActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

@@ -1,0 +1,9 @@
+.git
+**/node_modules
+**/.next
+**/dist
+**/.env
+**/.env.*
+!**/.env.*.example
+apps/android/.gradle
+apps/android/app/build

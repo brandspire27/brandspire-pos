@@ -1,0 +1,20 @@
+{
+  "name": "brandspire-pos",
+  "private": true,
+  "packageManager": "pnpm@11.24.0",
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "test": "turbo test",
+    "release:check": "node scripts/release/preflight.mjs",
+    "release:check:prod": "node scripts/release/preflight.mjs --production",
+    "release:check:prod-payments": "node scripts/release/preflight.mjs --production --require-payments",
+    "staging:smoke": "node scripts/release/staging-smoke.mjs",
+    "quality:audit": "node scripts/release/quality-audit.mjs"
+  },
+  "devDependencies": {
+    "turbo": "2.10.12",
+    "typescript": "6.0.3"
+  }
+}
