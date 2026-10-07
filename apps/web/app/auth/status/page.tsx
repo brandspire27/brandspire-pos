@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
+import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
 import { getSupabaseBrowserClient } from '@/lib/supabase';
 
 type Application = {
@@ -13,7 +13,7 @@ type Application = {
   created_at: string;
 };
 
-export default function ApplicationStatusPage() {
+function ApplicationStatusPageContent() {
   const searchParams = useSearchParams();
   const [application, setApplication] = useState<Application | null>(null);
   const [loading, setLoading] = useState(true);
@@ -86,4 +86,8 @@ export default function ApplicationStatusPage() {
       </section>
     </main>
   );
+}
+
+export default function ApplicationStatusPage() {
+  return <Suspense fallback={<main className="auth-wrap"><section className="card auth-card narrow center"><p style={{ marginTop: 28 }}>Checking your application...</p></section></main>}><ApplicationStatusPageContent /></Suspense>;
 }

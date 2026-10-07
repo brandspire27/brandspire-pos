@@ -81,15 +81,17 @@ export default function InvoiceDetailView({ invoiceId, portal }:Props){
   if(loading||!org)return <WorkspaceLoader/>;
   if(error||!invoice||!business)return <main className="auth-wrap"><div className="card auth-card narrow"><div className="form-error">{error||'Invoice not found.'}</div></div></main>;
 
+  const safeInvoice = invoice!;
+  const safeBusiness = business!;
   const Shell=portal==='owner'?OwnerShell:StaffShell;
   const t=posText(org.preferredLanguage);
-  const customer=invoice.customers;
+  const customer=safeInvoice.customers;
   const pageSize=format==='A4'?'A4':format==='THERMAL_80MM'?'80mm auto':'58mm auto';
   const margin=format==='A4'?'12mm':'3mm';
   const receiptClass=format==='A4'?'receipt-a4':format==='THERMAL_80MM'?'receipt-80':'receipt-58';
   const printLabel=format==='A4'?'A4 Invoice':format==='THERMAL_80MM'?'3-inch / 80mm Receipt':'2-inch / 58mm Receipt';
-  const pdfInput={invoice,items,business,customer,footer:printSettings.invoiceFooter||printSettings.receiptFooter};
-  const canCancel=portal==='owner'&&invoice.status!=='CANCELLED'&&invoice.status!=='REFUNDED'&&Number(invoice.amount_paid)===0;
+  const pdfInput={invoice:safeInvoice,items,business:safeBusiness,customer,footer:printSettings.invoiceFooter||printSettings.receiptFooter};
+  const canCancel=portal==='owner'&&safeInvoice.status!=='CANCELLED'&&safeInvoice.status!=='REFUNDED'&&Number(safeInvoice.amount_paid)===0;
 
   async function sharePdf(){
     setShareStatus('');
@@ -104,7 +106,7 @@ export default function InvoiceDetailView({ invoiceId, portal }:Props){
 
   function shareWhatsApp(){
     const name=customer?.name||'Customer';
-    const text=`Hello ${name}, your invoice ${invoice.invoice_number} from ${business.name} is ${formatINR(invoice.grand_total)}.${Number(invoice.amount_due)>0?` Amount due: ${formatINR(invoice.amount_due)}.`:''} Thank you.`;
+    const text=`Hello ${name}, your invoice ${safeInvoice.invoice_number} from ${safeBusiness.name} is ${formatINR(safeInvoice.grand_total)}.${Number(safeInvoice.amount_due)>0?` Amount due: ${formatINR(safeInvoice.amount_due)}.`:''} Thank you.`;
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`,'_blank','noopener,noreferrer');
   }
 
@@ -125,38 +127,38 @@ export default function InvoiceDetailView({ invoiceId, portal }:Props){
     <div className="screen-only">
       <Shell businessName={org.organizationName} language={org.preferredLanguage}>
         <div className="content-head pos-page-head">
-          <div><span className="page-kicker">{t.invoiceKicker}</span><h1>{invoice.invoice_number}</h1><p>{formatDateTime(invoice.created_at)} · {customer?.name||t.walkInCustomer}</p></div>
+          <div><span className="page-kicker">{t.invoiceKicker}</span><h1>{safeInvoice.invoice_number}</h1><p>{formatDateTime(safeInvoice.created_at)} · {customer?.name||t.walkInCustomer}</p></div>
           <div className="invoice-top-actions">
             <button className="btn" onClick={()=>router.back()}>← {t.back}</button>
             <button className="btn" onClick={()=>downloadA4InvoicePdf(pdfInput)}>{t.downloadPdf}</button>
             <button className="btn" onClick={sharePdf}>{t.sharePdf}</button>
             <button className="btn whatsapp-button" onClick={shareWhatsApp}>WhatsApp</button>
-            {portal==='owner'&&Number(invoice.amount_due)>0&&invoice.status!=='CANCELLED'&&<button className="btn" onClick={()=>router.push('/owner/dues')}>{t.collectPayment}</button>}
+          {portal==='owner'&&Number(safeInvoice.amount_due)>0&&safeInvoice.status!=='CANCELLED'&&<button className="btn" onClick={()=>router.push('/owner/dues')}>{t.collectPayment}</button>}
           </div>
         </div>
         {shareStatus&&<div className="form-success">{shareStatus}</div>}
         {error&&<div className="form-error">{error}</div>}
-        {invoice.status==='CANCELLED'&&<div className="invoice-cancelled-banner"><strong>{t.cancelledInvoice}</strong><span>{invoice.cancellation_reason||t.noReasonRecorded}{invoice.cancelled_at?` · ${formatDateTime(invoice.cancelled_at)}`:''}</span></div>}
+        {safeInvoice.status==='CANCELLED'&&<div className="invoice-cancelled-banner"><strong>{t.cancelledInvoice}</strong><span>{safeInvoice.cancellation_reason||t.noReasonRecorded}{safeInvoice.cancelled_at?` · ${formatDateTime(safeInvoice.cancelled_at)}`:''}</span></div>}
 
         <div className="invoice-detail-grid">
           <section className="card invoice-detail-card">
             <div className="invoice-detail-head">
-              <div><span className={`mini-status mini-${invoice.payment_status.toLowerCase()}`}>{localizedStatus(org.preferredLanguage,invoice.payment_status)}</span><h2>{invoice.invoice_number}</h2><span className="muted">{invoice.payment_method||t.noPaymentMethod}</span></div>
-              <div className="invoice-detail-meta"><div>{t.created}</div><strong>{formatDateTime(invoice.created_at)}</strong><div style={{marginTop:7}}>{t.status} · {localizedStatus(org.preferredLanguage,invoice.status)}</div></div>
+            <div><span className={`mini-status mini-${safeInvoice.payment_status.toLowerCase()}`}>{localizedStatus(org.preferredLanguage,safeInvoice.payment_status)}</span><h2>{safeInvoice.invoice_number}</h2><span className="muted">{safeInvoice.payment_method||t.noPaymentMethod}</span></div>
+            <div className="invoice-detail-meta"><div>{t.created}</div><strong>{formatDateTime(safeInvoice.created_at)}</strong><div style={{marginTop:7}}>{t.status} · {localizedStatus(org.preferredLanguage,safeInvoice.status)}</div></div>
             </div>
             <div className="invoice-party-grid">
-              <div className="invoice-party"><small>{t.from}</small><h3>{business.name}</h3><p>{business.address||t.businessAddressMissing}</p><p>{business.phone||business.email||''}</p><p>{business.gstin?`GSTIN · ${business.gstin}`:''}</p></div>
+            <div className="invoice-party"><small>{t.from}</small><h3>{safeBusiness.name}</h3><p>{safeBusiness.address||t.businessAddressMissing}</p><p>{safeBusiness.phone||safeBusiness.email||''}</p><p>{safeBusiness.gstin?`GSTIN · ${safeBusiness.gstin}`:''}</p></div>
               <div className="invoice-party"><small>{t.billTo}</small><h3>{customer?.name||t.walkInCustomer}</h3><p>{customer?.address||customer?.state||t.noAddressShort}</p><p>{customer?.phone||customer?.email||''}</p><p>{customer?.gstin?`GSTIN · ${customer.gstin}`:''}</p></div>
             </div>
             <div className="data-table-wrap invoice-items-wrap"><table className="data-table"><thead><tr><th>{t.product}</th><th>{t.qty}</th><th>{t.rate}</th><th>GST</th><th>{t.total}</th></tr></thead><tbody>{items.map(item=><tr key={item.id}><td><strong>{item.product_name_snapshot}</strong><small>{item.hsn_sac_snapshot?`HSN/SAC ${item.hsn_sac_snapshot}`:''}</small></td><td>{Number(item.quantity)} {item.unit_snapshot}</td><td>{formatINR(item.unit_price)}</td><td>{Number(item.tax_rate)}%</td><td><strong>{formatINR(item.line_total)}</strong></td></tr>)}</tbody></table></div>
-            <div className="invoice-totals-box"><div><span>{t.subtotal}</span><strong>{formatINR(invoice.subtotal)}</strong></div>{Number(invoice.discount_amount)>0&&<div><span>{t.discount}</span><strong>- {formatINR(invoice.discount_amount)}</strong></div>}<div><span>{t.taxable}</span><strong>{formatINR(invoice.taxable_amount)}</strong></div>{Number(invoice.cgst)>0&&<div><span>CGST</span><strong>{formatINR(invoice.cgst)}</strong></div>}{Number(invoice.sgst)>0&&<div><span>SGST</span><strong>{formatINR(invoice.sgst)}</strong></div>}{Number(invoice.igst)>0&&<div><span>IGST</span><strong>{formatINR(invoice.igst)}</strong></div>}<div className="invoice-grand"><span>{t.grandTotal}</span><strong>{formatINR(invoice.grand_total)}</strong></div><div><span>{t.paid}</span><strong>{formatINR(invoice.amount_paid)}</strong></div><div><span>{t.due}</span><strong>{formatINR(invoice.amount_due)}</strong></div></div>
+          <div className="invoice-totals-box"><div><span>{t.subtotal}</span><strong>{formatINR(safeInvoice.subtotal)}</strong></div>{Number(safeInvoice.discount_amount)>0&&<div><span>{t.discount}</span><strong>- {formatINR(safeInvoice.discount_amount)}</strong></div>}<div><span>{t.taxable}</span><strong>{formatINR(safeInvoice.taxable_amount)}</strong></div>{Number(safeInvoice.cgst)>0&&<div><span>CGST</span><strong>{formatINR(safeInvoice.cgst)}</strong></div>}{Number(safeInvoice.sgst)>0&&<div><span>SGST</span><strong>{formatINR(safeInvoice.sgst)}</strong></div>}{Number(safeInvoice.igst)>0&&<div><span>IGST</span><strong>{formatINR(safeInvoice.igst)}</strong></div>}<div className="invoice-grand"><span>{t.grandTotal}</span><strong>{formatINR(safeInvoice.grand_total)}</strong></div><div><span>{t.paid}</span><strong>{formatINR(safeInvoice.amount_paid)}</strong></div><div><span>{t.due}</span><strong>{formatINR(safeInvoice.amount_due)}</strong></div></div>
 
             <div className="payment-history-section">
               <div className="section-head"><div><span className="page-kicker">{t.paymentHistory}</span><h3>{t.moneyReceivedHistory}</h3></div></div>
               {payments.length===0?<div className="empty-state compact">{t.noPaymentRecorded}</div>:<div className="payment-history-list">{payments.map(payment=><div key={payment.id}><span><strong>{payment.method}</strong><small>{formatDateTime(payment.created_at)}{payment.note?` · ${payment.note}`:''}</small></span><strong>{formatINR(payment.amount)}</strong></div>)}</div>}
             </div>
 
-            {portal==='owner'&&invoice.status!=='CANCELLED'&&invoice.status!=='REFUNDED'&&<div className="invoice-danger-zone">
+          {portal==='owner'&&safeInvoice.status!=='CANCELLED'&&safeInvoice.status!=='REFUNDED'&&<div className="invoice-danger-zone">
               <div><span className="page-kicker">{t.ownerControl}</span><h3>{t.cancelInvoiceTitle}</h3><p>{canCancel?t.cancelSafeCopy:t.cancelPaidCopy}</p></div>
               {canCancel&&!cancelMode&&<button className="btn btn-danger-outline" onClick={()=>setCancelMode(true)}>{t.cancelInvoice}</button>}
               {canCancel&&cancelMode&&<div className="cancel-form"><textarea value={cancelReason} onChange={(e)=>setCancelReason(e.target.value)} rows={3} placeholder={t.cancelReasonPlaceholder}/><div><button className="btn" onClick={()=>{setCancelMode(false);setCancelReason('');}}>{t.keepInvoice}</button><button className="btn btn-danger" onClick={cancelInvoice} disabled={cancelling||cancelReason.trim().length<3}>{cancelling?t.cancelling:t.confirmCancellation}</button></div></div>}
@@ -176,13 +178,13 @@ export default function InvoiceDetailView({ invoiceId, portal }:Props){
     <div className="print-only-shell">
       <style media="print">{`@page { size: ${pageSize}; margin: ${margin}; }`}</style>
       <div className={`print-document receipt ${receiptClass}`}>
-        <div className="receipt-brand"><div>{printSettings.receiptHeader&&<p><strong>{printSettings.receiptHeader}</strong></p>}<h1>{business.name}</h1><p>{business.address||''}</p><p>{business.phone||''}{business.email?` · ${business.email}`:''}</p><p>{printSettings.showGstin&&business.gstin?`GSTIN: ${business.gstin}`:''}</p></div>{format==='A4'&&<div className="a4-title"><strong>TAX INVOICE</strong><p>{invoice.invoice_number}</p></div>}</div>
+        <div className="receipt-brand"><div>{printSettings.receiptHeader&&<p><strong>{printSettings.receiptHeader}</strong></p>}<h1>{safeBusiness.name}</h1><p>{safeBusiness.address||''}</p><p>{safeBusiness.phone||''}{safeBusiness.email?` · ${safeBusiness.email}`:''}</p><p>{printSettings.showGstin&&safeBusiness.gstin?`GSTIN: ${safeBusiness.gstin}`:''}</p></div>{format==='A4'&&<div className="a4-title"><strong>TAX INVOICE</strong><p>{safeInvoice.invoice_number}</p></div>}</div>
         <div className="receipt-rule"/>
-        <div className="receipt-meta"><div><span>{t.invoiceKicker}</span><strong>{invoice.invoice_number}</strong></div><div><span>{t.date}</span><strong>{formatDateTime(invoice.created_at)}</strong></div><div><span>{t.customer}</span><strong>{customer?.name||t.walkInCustomer}</strong></div>{customer?.gstin&&<div><span>GSTIN</span><strong>{customer.gstin}</strong></div>}<div><span>{t.payment}</span><strong>{invoice.payment_method||'—'} · {invoice.payment_status}</strong></div>{invoice.status==='CANCELLED'&&<div><span>{t.status}</span><strong>{localizedStatus(org.preferredLanguage,'CANCELLED')}</strong></div>}</div>
+        <div className="receipt-meta"><div><span>{t.invoiceKicker}</span><strong>{safeInvoice.invoice_number}</strong></div><div><span>{t.date}</span><strong>{formatDateTime(safeInvoice.created_at)}</strong></div><div><span>{t.customer}</span><strong>{customer?.name||t.walkInCustomer}</strong></div>{customer?.gstin&&<div><span>GSTIN</span><strong>{customer.gstin}</strong></div>}<div><span>{t.payment}</span><strong>{safeInvoice.payment_method||'—'} · {safeInvoice.payment_status}</strong></div>{safeInvoice.status==='CANCELLED'&&<div><span>{t.status}</span><strong>{localizedStatus(org.preferredLanguage,'CANCELLED')}</strong></div>}</div>
         <div className="receipt-rule"/>
         <table className="receipt-table"><thead><tr><th>Item</th><th>Qty</th><th>Rate</th><th>Amt</th></tr></thead><tbody>{items.map(item=><tr key={item.id}><td>{item.product_name_snapshot}{item.hsn_sac_snapshot?<><br/><small>HSN {item.hsn_sac_snapshot} · GST {Number(item.tax_rate)}%</small></>:null}</td><td>{Number(item.quantity)}</td><td>{Number(item.unit_price).toFixed(2)}</td><td>{Number(item.line_total).toFixed(2)}</td></tr>)}</tbody></table>
-        <div className="receipt-summary"><div><span>{t.taxable}</span><span>₹{Number(invoice.taxable_amount).toFixed(2)}</span></div>{Number(invoice.discount_amount)>0&&<div><span>{t.discount}</span><span>-₹{Number(invoice.discount_amount).toFixed(2)}</span></div>}{Number(invoice.cgst)>0&&<div><span>CGST</span><span>₹{Number(invoice.cgst).toFixed(2)}</span></div>}{Number(invoice.sgst)>0&&<div><span>SGST</span><span>₹{Number(invoice.sgst).toFixed(2)}</span></div>}{Number(invoice.igst)>0&&<div><span>IGST</span><span>₹{Number(invoice.igst).toFixed(2)}</span></div>}<div className="total"><span>TOTAL</span><span>₹{Number(invoice.grand_total).toFixed(2)}</span></div><div><span>{t.paid}</span><span>₹{Number(invoice.amount_paid).toFixed(2)}</span></div>{Number(invoice.amount_due)>0&&<div><span>{t.due}</span><span>₹{Number(invoice.amount_due).toFixed(2)}</span></div>}</div>
-        <div className="receipt-footer"><div className="receipt-rule"/><strong>{invoice.status==='CANCELLED'?'CANCELLED — NOT VALID FOR SALE':printSettings.receiptFooter||'Thank you for your business'}</strong><p>Generated with Brandspire POS · A Brandspire Product</p></div>
+        <div className="receipt-summary"><div><span>{t.taxable}</span><span>₹{Number(safeInvoice.taxable_amount).toFixed(2)}</span></div>{Number(safeInvoice.discount_amount)>0&&<div><span>{t.discount}</span><span>-₹{Number(safeInvoice.discount_amount).toFixed(2)}</span></div>}{Number(safeInvoice.cgst)>0&&<div><span>CGST</span><span>₹{Number(safeInvoice.cgst).toFixed(2)}</span></div>}{Number(safeInvoice.sgst)>0&&<div><span>SGST</span><span>₹{Number(safeInvoice.sgst).toFixed(2)}</span></div>}{Number(safeInvoice.igst)>0&&<div><span>IGST</span><span>₹{Number(safeInvoice.igst).toFixed(2)}</span></div>}<div className="total"><span>TOTAL</span><span>₹{Number(safeInvoice.grand_total).toFixed(2)}</span></div><div><span>{t.paid}</span><span>₹{Number(safeInvoice.amount_paid).toFixed(2)}</span></div>{Number(safeInvoice.amount_due)>0&&<div><span>{t.due}</span><span>₹{Number(safeInvoice.amount_due).toFixed(2)}</span></div>}</div>
+        <div className="receipt-footer"><div className="receipt-rule"/><strong>{safeInvoice.status==='CANCELLED'?'CANCELLED — NOT VALID FOR SALE':printSettings.receiptFooter||'Thank you for your business'}</strong><p>Generated with Brandspire POS · A Brandspire Product</p></div>
       </div>
     </div>
   </>;

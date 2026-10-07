@@ -44,13 +44,14 @@ export default function OwnerDashboard() {
           supabase.from('invoices').select('id, invoice_number, grand_total, payment_status, created_at').eq('organization_id', current.organizationId).order('created_at', { ascending: false }).limit(5)
         ]);
 
-        const invoicesToday = invoiceResult.data ?? [];
-        const customerBalances = outstandingResult.data ?? [];
+        const invoicesToday = (invoiceResult.data ?? []) as Array<{ grand_total?: number | string | null }>;
+        const customerBalances = (outstandingResult.data ?? []) as Array<{ outstanding_balance?: number | string | null }>;
+        const productsLowStock = (lowStockResult.data ?? []) as Array<{ stock?: number | string | null; low_stock_threshold?: number | string | null }>;
         setData({
-          todaySales: invoicesToday.reduce((sum, invoice) => sum + Number(invoice.grand_total ?? 0), 0),
+          todaySales: invoicesToday.reduce<number>((sum, invoice) => sum + Number(invoice.grand_total ?? 0), 0),
           todayBills: invoicesToday.length,
-          lowStock: (lowStockResult.data ?? []).filter((product) => Number(product.stock ?? 0) <= Number(product.low_stock_threshold ?? 0)).length,
-          outstanding: customerBalances.reduce((sum, customer) => sum + Number(customer.outstanding_balance ?? 0), 0),
+          lowStock: productsLowStock.filter((product) => Number(product.stock ?? 0) <= Number(product.low_stock_threshold ?? 0)).length,
+          outstanding: customerBalances.reduce<number>((sum, customer) => sum + Number(customer.outstanding_balance ?? 0), 0),
           recentInvoices: (recentResult.data ?? []) as DashboardData['recentInvoices']
         });
       } catch (err) {

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { adminDate, adminRequest } from '@/lib/admin-api';
 
@@ -18,7 +18,7 @@ type Tenant = {
   reason: string | null;
 };
 
-export default function AdminOrganizationsPage() {
+function AdminOrganizationsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [rows, setRows] = useState<Tenant[]>([]);
@@ -50,4 +50,8 @@ export default function AdminOrganizationsPage() {
       {loading ? <div className="admin-empty">Loading organizations…</div> : rows.length === 0 ? <div className="admin-empty">No organizations match these filters.</div> : <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Business</th><th>Platform</th><th>Subscription</th><th>Access ends</th><th>Attention</th><th></th></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td><strong>{row.name}</strong><small>{row.email || row.phone || row.state || '—'}</small></td><td><span className={`admin-status ${row.status === 'ACTIVE' ? 'admin-status-good' : row.status === 'SUSPENDED' ? 'admin-status-bad' : ''}`}>{row.status}</span></td><td><strong>{row.subscription?.status ?? 'NONE'}</strong><small>{row.subscription?.provider ?? 'Manual access'}</small></td><td>{adminDate(row.subscription?.ends_at)}</td><td>{row.needsAttention ? <span className="admin-attention">{row.reason?.replaceAll('_', ' ')}</span> : <span className="admin-ok">Healthy</span>}</td><td><Link className="admin-open" href={`/admin/organizations/${row.id}`}>Open →</Link></td></tr>)}</tbody></table></div>}
     </section>
   </main>;
+}
+
+export default function AdminOrganizationsPage() {
+  return <Suspense fallback={<main className="admin-page-standalone"><div className="admin-empty">Loading organizations…</div></main>}><AdminOrganizationsPageContent /></Suspense>;
 }

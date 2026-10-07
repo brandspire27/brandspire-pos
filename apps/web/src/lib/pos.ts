@@ -127,6 +127,10 @@ export function isSubscriptionUsable(status: string, endsAt: string | null) {
   return new Date(endsAt).getTime() > Date.now();
 }
 
+export function isTrialExpired(status: string, endsAt: string | null) {
+  return status === 'TRIAL' && !!endsAt && new Date(endsAt).getTime() <= Date.now();
+}
+
 export function formatINR(value: number | string | null | undefined) {
   const number = Number(value ?? 0);
   return new Intl.NumberFormat('en-IN', {
