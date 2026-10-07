@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="brandspire_bg">#F6F8FC</color>
+    <color name="brandspire_blue">#2D53DB</color>
+    <color name="brandspire_blue_bright">#4269E8</color>
+    <color name="brandspire_ink">#0B1426</color>
+    <color name="brandspire_muted">#616D84</color>
+    <color name="brandspire_navy">#0A162A</color>
+    <color name="brandspire_surface">#FFFFFF</color>
+    <style name="Theme.BrandspirePOS" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:colorAccent">@color/brandspire_blue</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:statusBarColor">@color/brandspire_bg</item>
+        <item name="android:navigationBarColor">@color/brandspire_surface</item>
+        <item name="android:windowBackground">@drawable/brandspire_launch_background</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+</resources>

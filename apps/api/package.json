@@ -14,12 +14,14 @@
     "@nestjs/platform-express": "latest",
     "@supabase/supabase-js": "latest",
     "dotenv": "latest",
+    "express": "^5.2.1",
     "reflect-metadata": "latest",
     "rxjs": "latest",
     "zod": "latest"
   },
   "devDependencies": {
     "@nestjs/cli": "latest",
+    "@types/express": "^5.0.6",
     "@types/node": "latest",
     "jest": "latest",
     "ts-jest": "latest",

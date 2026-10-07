@@ -1,0 +1,12 @@
+R_DEF: Internal format may change without notice
+local
+color brandspire_bg
+color brandspire_blue
+color brandspire_blue_bright
+color brandspire_ink
+color brandspire_muted
+color brandspire_navy
+color brandspire_surface
+drawable brandspire_launch_background
+style Theme.BrandspirePOS
+xml file_paths

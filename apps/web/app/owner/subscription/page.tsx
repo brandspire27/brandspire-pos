@@ -1,14 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import OwnerShell from '@/components/pos/OwnerShell';
 import WorkspaceLoader from '@/components/pos/WorkspaceLoader';
 import { formatDateTime, formatINR, getCurrentOrganization, type CurrentOrganization } from '@/lib/pos';
 import { phase9Text } from '@/lib/phase9-i18n';
-import { cancelSubscription, createSubscriptionCheckout, ensureRazorpayCheckout, getSubscriptionOverview, verifySubscriptionCheckout, type SubscriptionOverview } from '@/lib/subscription-api';
+import { cancelSubscription, createSubscriptionCheckout, ensureCashfreeCheckout, getSubscriptionOverview, verifySubscriptionCheckout, type SubscriptionOverview } from '@/lib/subscription-api';
 
-type RazorpayResult = { razorpay_payment_id?:string; razorpay_subscription_id?:string; razorpay_signature?:string };
 
 export default function SubscriptionPage() {
   const router = useRouter();
@@ -18,6 +17,7 @@ export default function SubscriptionPage() {
   const [working,setWorking] = useState('');
   const [error,setError] = useState('');
   const [success,setSuccess] = useState('');
+  const processedReturn = useRef(false);
 
   const load = useCallback(async()=>{
     try {
@@ -27,39 +27,49 @@ export default function SubscriptionPage() {
       setOrg(current);
       const result = await getSubscriptionOverview();
       setOverview(result.data);
+
+      if (!processedReturn.current && typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search);
+        const subscriptionId = params.get('cashfree_subscription_id');
+        const failed = params.get('cashfree_payment') === 'failed';
+        if (subscriptionId) {
+          processedReturn.current = true;
+          setWorking('verify-return');
+          setSuccess('Payment verification in progress…');
+          try {
+            await verifySubscriptionCheckout({ subscriptionId });
+            setSuccess('Subscription verified successfully.');
+            const refreshed = await getSubscriptionOverview();
+            setOverview(refreshed.data);
+            window.history.replaceState({}, '', window.location.pathname);
+          } catch(err) {
+            setError(err instanceof Error ? err.message : 'Checkout could not be completed.');
+          } finally {
+            setWorking('');
+          }
+        } else if (failed) {
+          processedReturn.current = true;
+          setError('Checkout could not be completed.');
+          window.history.replaceState({}, '', window.location.pathname);
+        }
+      }
     } catch(err){ setError(err instanceof Error?err.message:'Could not load subscription.'); }
     finally{setLoading(false);}
   },[router]);
-
-  useEffect(()=>{load();},[load]);
+  useEffect(()=>{void load();},[load]);
   if(loading || !org) return <WorkspaceLoader/>;
   const t = phase9Text(org.preferredLanguage);
 
   async function start(planId:string, cycle:'MONTHLY'|'YEARLY'){
     setWorking(`${planId}-${cycle}`);setError('');setSuccess('');
     try{
-      await ensureRazorpayCheckout();
       const checkout = (await createSubscriptionCheckout(planId,cycle)).data;
-      if(!window.Razorpay) throw new Error('Razorpay Checkout did not load');
-      const rzp = new window.Razorpay({
-        key:checkout.keyId,
-        subscription_id:checkout.subscriptionId,
-        name:'Brandspire POS',
-        description:`${checkout.planName} · ${cycle==='MONTHLY'?'Monthly':'Yearly'}`,
-        prefill:{email:checkout.ownerEmail},
-        notes:{product:'Brandspire POS'},
-        theme:{color:'#3159d9'},
-        handler:async(result:unknown)=>{
-          const response=result as RazorpayResult;
-          if(!response.razorpay_payment_id||!response.razorpay_subscription_id||!response.razorpay_signature){setError(t.checkoutFailed);return;}
-          setSuccess(t.finalizing);
-          await verifySubscriptionCheckout({paymentId:response.razorpay_payment_id,subscriptionId:response.razorpay_subscription_id,signature:response.razorpay_signature});
-          setSuccess(t.activated);setWorking('');await load();
-        },
-        modal:{ondismiss:()=>setWorking('')}
+      await ensureCashfreeCheckout(overview?.mode ?? 'sandbox');
+      if(!window.Cashfree) throw new Error('Cashfree Checkout did not load');
+      await window.Cashfree({mode:overview?.mode ?? 'sandbox'}).checkout({
+        subsSessionId: checkout.subscriptionSessionId,
+        redirectTarget: '_self'
       });
-      rzp.on('payment.failed',()=>{setError(t.checkoutFailed);setWorking('');});
-      rzp.open();
     }catch(err){setError(err instanceof Error?err.message:t.checkoutFailed);setWorking('');}
   }
 
@@ -94,7 +104,7 @@ export default function SubscriptionPage() {
     </section>
 
     <section className="card pos-panel top-gap"><div className="panel-head"><div><span className="page-kicker">{t.paymentHistory}</span><h2>{t.paymentHistory}</h2></div></div>
-      <div className="compact-list">{(overview?.transactions??[]).length===0?<div className="empty-state">{t.noPayments}</div>:(overview?.transactions??[]).map(tx=><div className="compact-row" key={tx.id}><div><strong>{formatINR(tx.amount)}</strong><small>{tx.method??'Razorpay'} · {formatDateTime(tx.captured_at??tx.created_at)}</small></div><div className="compact-row-right"><strong>{tx.status}</strong><small>{tx.provider_payment_id??'—'}</small></div></div>)}</div>
+      <div className="compact-list">{(overview?.transactions??[]).length===0?<div className="empty-state">{t.noPayments}</div>:(overview?.transactions??[]).map(tx=><div className="compact-row" key={tx.id}><div><strong>{formatINR(tx.amount)}</strong><small>{tx.method??'Cashfree'} · {formatDateTime(tx.captured_at??tx.created_at)}</small></div><div className="compact-row-right"><strong>{tx.status}</strong><small>{tx.provider_payment_id??'—'}</small></div></div>)}</div>
     </section>
   </OwnerShell>;
 }

@@ -1,23 +1,34 @@
-node_modules
-.next
-dist
-.env
-.env.local
-*.log
-.DS_Store
-coverage
-.turbo
-backups/
-apps/api/.env.production
-apps/web/.env.production.local
-*.keystore
-*.jks
+# Dependencies
+node_modules/
+.pnpm-store/
 
-# Local environment and IDE files
+# Build/cache output
+.next/
+out/
+dist/
+coverage/
+.turbo/
+
+# Local environment / secrets
+.env
 .env.*
 !.env.example
-.idea/
+!.env.*.example
+
+# Android local machine config
 apps/android/local.properties
-build/
-**/build/
-**/.gradle/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local databases / logs
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# Generated reports
+reports/

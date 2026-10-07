@@ -23,7 +23,12 @@ function parseEnv(file) {
 function pass(message) { console.log(`PASS  ${message}`); }
 function fail(message) { failures.push(message); console.log(`FAIL  ${message}`); }
 function warn(message) { warnings.push(message); console.log(`WARN  ${message}`); }
-function present(env, key, scope) { env[key] ? pass(`${scope}: ${key}`) : fail(`${scope}: missing ${key}`); }
+function envValue(fileEnv, key) {
+  const processValue = process.env[key];
+  if (typeof processValue === 'string' && processValue.trim()) return processValue.trim();
+  return fileEnv[key] || '';
+}
+function present(env, key, scope) { envValue(env, key) ? pass(`${scope}: ${key}`) : fail(`${scope}: missing ${key}`); }
 function httpsOrFail(value, label) {
   if (!value) return;
   if (!value.startsWith('https://')) fail(`${label} must use HTTPS for production`); else pass(`${label} uses HTTPS`);
@@ -47,24 +52,24 @@ present(android, 'BRANDSPIRE_SUPABASE_URL', 'Android');
 present(android, 'BRANDSPIRE_SUPABASE_ANON_KEY', 'Android');
 present(android, 'BRANDSPIRE_API_BASE_URL', 'Android');
 
-const combinedClient = `${fs.existsSync(webPath) ? fs.readFileSync(webPath, 'utf8') : ''}\n${fs.existsSync(androidPath) ? fs.readFileSync(androidPath, 'utf8') : ''}`;
+const combinedClient = `${fs.existsSync(webPath) ? fs.readFileSync(webPath, 'utf8') : ''}\n${fs.existsSync(androidPath) ? fs.readFileSync(androidPath, 'utf8') : ''}\n${Object.keys(process.env).filter((key) => /^(NEXT_PUBLIC_|BRANDSPIRE_)/.test(key)).map((key) => `${key}=${process.env[key]}`).join('\n')}`;
 if (/SUPABASE_SERVICE_ROLE_KEY\s*=|CASHFREE_CLIENT_SECRET\s*=|CASHFREE_WEBHOOK_SECRET\s*=/.test(combinedClient)) fail('A server secret appears in Web or Android configuration');
 else pass('No backend service-role/Cashfree secrets found in client config');
 
-const cfId = api.CASHFREE_CLIENT_ID || '';
-const cfSecret = api.CASHFREE_CLIENT_SECRET || '';
+const cfId = envValue(api, 'CASHFREE_CLIENT_ID') || '';
+const cfSecret = envValue(api, 'CASHFREE_CLIENT_SECRET') || '';
 if (Boolean(cfId) !== Boolean(cfSecret)) fail('Cashfree Client ID and Secret must be configured together');
 else if (cfId && cfSecret) pass('Cashfree credential pair is configured');
 else if (requirePayments) fail('Cashfree credentials required by --require-payments');
 else warn('Cashfree credentials are not configured yet; subscription checkout remains unavailable');
 
 if (production) {
-  httpsOrFail(api.WEB_URL || api.CLIENT_URL, 'API WEB_URL/CLIENT_URL');
-  httpsOrFail(api.API_PUBLIC_URL, 'API_PUBLIC_URL');
-  httpsOrFail(web.NEXT_PUBLIC_API_URL, 'NEXT_PUBLIC_API_URL');
-  httpsOrFail(android.BRANDSPIRE_API_BASE_URL, 'Android API base URL');
-  if ((api.APP_ENV || '').toLowerCase() !== 'production') fail('API APP_ENV should be production'); else pass('API APP_ENV=production');
-  if ((api.CASHFREE_ENV || '').toLowerCase() !== 'production' && cfId) warn('Cashfree is configured but still in sandbox mode');
+  httpsOrFail(envValue(api, 'WEB_URL') || envValue(api, 'CLIENT_URL'), 'API WEB_URL/CLIENT_URL');
+  httpsOrFail(envValue(api, 'API_PUBLIC_URL'), 'API_PUBLIC_URL');
+  httpsOrFail(envValue(web, 'NEXT_PUBLIC_API_URL'), 'NEXT_PUBLIC_API_URL');
+  httpsOrFail(envValue(android, 'BRANDSPIRE_API_BASE_URL'), 'Android API base URL');
+  if ((envValue(api, 'APP_ENV') || '').toLowerCase() !== 'production') fail('API APP_ENV should be production'); else pass('API APP_ENV=production');
+  if ((envValue(api, 'CASHFREE_ENV') || '').toLowerCase() !== 'production' && cfId) warn('Cashfree is configured but still in sandbox mode');
 }
 
 const buildFile = path.join(root, 'apps', 'android', 'app', 'build.gradle.kts');
