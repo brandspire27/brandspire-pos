@@ -146,6 +146,15 @@ export class PosService {
     return result.rows.map((row) => ({ ...(row as DbRecord), tax_inclusive: Number((row as DbRecord).tax_inclusive) === 1, active: Number((row as DbRecord).active) === 1 }));
   }
 
+  async assistExactProducts(organizationId: string, term: string) {
+    const result = await this.database.execute(
+      `SELECT id FROM products WHERE organization_id = ? AND deleted_at IS NULL AND active = 1
+       AND (lower(trim(name)) = lower(?) OR lower(sku) = lower(?) OR barcode = ?) LIMIT 2`,
+      [organizationId, term, term, term]
+    );
+    return Promise.all(result.rows.map(row => this.product(organizationId, String(row.id))));
+  }
+
   async product(organizationId: string, productId: string) {
     const result = await this.database.execute(
       `SELECT id, name, sku, barcode, unit, hsn_sac, purchase_price, selling_price, tax_rate, tax_inclusive,

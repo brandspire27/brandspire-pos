@@ -1,6 +1,7 @@
 import { BadGatewayException, BadRequestException, Injectable } from '@nestjs/common';
 import { z } from 'zod';
 import { PosService } from './pos.service';
+import { localBillLines, localProductDraft } from './local-assist';
 
 const inputSchema = z.object({
   mode: z.enum(['product', 'bill']),
@@ -18,10 +19,33 @@ export class PosAssistService {
     const parsed = inputSchema.safeParse(input);
     if (!parsed.success) throw new BadRequestException(parsed.error.issues[0]?.message ?? 'Invalid assistant input');
     const { mode, text, image } = parsed.data;
+    if (!image && mode === 'product') {
+      const local = localProductDraft(text);
+      if (local) return { ...local, source: 'local' };
+    }
+    if (!image && mode === 'bill') {
+      const lines = localBillLines(text);
+      if (lines) {
+        const items = new Map<string, { product: Record<string, unknown>; quantity: number }>();
+        for (const line of lines) {
+          const matches = await this.pos.assistExactProducts(organizationId, line.name);
+          if (matches.length !== 1) throw new BadRequestException(`Use an exact, unique product name or SKU for "${line.name}". No items were added.`);
+          const product = matches[0];
+          const id = String(product.id);
+          const quantity = (items.get(id)?.quantity ?? 0) + line.quantity;
+          if (quantity > 100000 || quantity > Number(product.stock)) throw new BadRequestException(`Insufficient stock or excessive quantity for "${line.name}". No items were added.`);
+          items.set(id, { product, quantity });
+        }
+        return { items: [...items.values()], source: 'local' };
+      }
+    }
     const key = process.env.AI_PROVIDER_KEY?.trim();
     const model = process.env.AI_PROVIDER_MODEL?.trim();
     if (process.env.AI_PROVIDER !== 'openai-compatible' || !key || !model) {
-      throw new BadRequestException('Configure AI_PROVIDER, AI_PROVIDER_KEY and AI_PROVIDER_MODEL on the API to enable assistance. Photo entry requires a vision-capable model.');
+      throw new BadRequestException(image
+        ? 'Photo reading needs a configured AI provider. For now, type or dictate the product name and explicit price.'
+        : mode === 'product' ? 'Use a name and price, for example: Milk @ 60 or Milk 60 rupees. Free-form AI is not configured.'
+        : 'Use quantities and exact catalog names or SKUs, separated by commas: 2 Milk, 1 Bread. Free-form AI is not configured.');
     }
     const catalog: Record<string, unknown>[] = mode === 'bill' ? await this.pos.listProducts(organizationId, { query: '', activeOnly: true, limit: 500 }) : [];
     const instruction = mode === 'product'
