@@ -2,6 +2,7 @@ import { BadGatewayException, BadRequestException, Injectable } from '@nestjs/co
 import { z } from 'zod';
 import { PosService } from './pos.service';
 import { localBillLines, localProductDraft } from './local-assist';
+import { assistConfig } from './assist-config';
 
 const inputSchema = z.object({
   mode: z.enum(['product', 'bill']),
@@ -39,13 +40,12 @@ export class PosAssistService {
         return { items: [...items.values()], source: 'local' };
       }
     }
-    const key = process.env.AI_PROVIDER_KEY?.trim();
-    const model = process.env.AI_PROVIDER_MODEL?.trim();
-    if (process.env.AI_PROVIDER !== 'openai-compatible' || !key || !model) {
-      throw new BadRequestException(image
+    const { key, model, baseUrl, missing } = assistConfig();
+    if (missing.length) {
+      throw new BadRequestException((image
         ? 'Photo reading needs a configured AI provider. For now, type or dictate the product name and explicit price.'
         : mode === 'product' ? 'Use a name and price, for example: Milk @ 60 or Milk 60 rupees. Free-form AI is not configured.'
-        : 'Use quantities and exact catalog names or SKUs, separated by commas: 2 Milk, 1 Bread. Free-form AI is not configured.');
+        : 'Use quantities and exact catalog names or SKUs, separated by commas: 2 Milk, 1 Bread. Free-form AI is not configured.') + ` Backend settings: ${missing.join('; ')}. Save environment settings and redeploy this API.`);
     }
     const catalog: Record<string, unknown>[] = mode === 'bill' ? await this.pos.listProducts(organizationId, { query: '', activeOnly: true, limit: 500 }) : [];
     const instruction = mode === 'product'
@@ -53,7 +53,7 @@ export class PosAssistService {
       : 'Prepare a bill draft from text/photo using only catalog product IDs. Return JSON {"items":[{"productId":string,"quantity":number}]}. Do not invent products or prices. Omit ambiguous or unmatched items. No matches means an empty items array.';
     let output: unknown;
     try {
-      const response = await fetch(`${(process.env.AI_PROVIDER_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/$/, '')}/chat/completions`, {
+      const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
         method: 'POST', signal: AbortSignal.timeout(30000),
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
         body: JSON.stringify({ model, temperature: 0, max_tokens: 1500, response_format: { type: 'json_object' }, messages: [
@@ -61,10 +61,20 @@ export class PosAssistService {
           { role: 'user', content: image ? [{ type: 'text', text: text || 'Read this product or shopping list.' }, { type: 'image_url', image_url: { url: image } }] : text }
         ] })
       });
-      if (!response.ok) throw new Error('Provider rejected request');
+      if (!response.ok) {
+        const reason = response.status === 401 ? 'AI provider rejected the API key. Check the backend key.'
+          : response.status === 403 ? 'AI provider denied access. Check model access and project permissions.'
+          : response.status === 429 ? 'AI provider quota or rate limit reached. Try later or use basic entry.'
+          : response.status === 400 || response.status === 404 ? 'AI provider rejected the model or request format. Check AI_PROVIDER_MODEL.'
+          : 'AI provider is temporarily unavailable. Try again later.';
+        throw new BadGatewayException(reason);
+      }
       const body = await response.json() as { choices?: { message?: { content?: string } }[] };
       output = JSON.parse(body.choices?.[0]?.message?.content ?? '');
-    } catch { throw new BadGatewayException('AI could not read this request. Try a clearer photo or typed instructions.'); }
+    } catch (error) {
+      if (error instanceof BadGatewayException) throw error;
+      throw new BadGatewayException('AI request timed out, failed to connect, or returned invalid JSON. Try again or use basic entry.');
+    }
     if (mode === 'product') {
       const result = productSchema.safeParse(output);
       if (!result.success) throw new BadGatewayException('No valid product was found. Enter the name and price manually.');

@@ -28,6 +28,8 @@ The billing assistant adds matched items to the current cart as a reviewable dra
 
 Configure the API's existing environment settings:
 
+For Groq, `AI_PROVIDER=groq` plus `GROQ_API_KEY` (or `AI_PROVIDER_KEY`) is supported. Explicit Groq selection uses `https://api.groq.com/openai/v1` and defaults to `qwen/qwen3.8-27b`; `AI_PROVIDER_MODEL` can override the model. Missing settings are identified by name without exposing values. Provider authentication, access, quota and model errors are distinguished. Save environment changes and deploy the API before retrying. The legacy OpenAI-compatible configuration below remains supported.
+
 ```dotenv
 AI_PROVIDER=openai-compatible
 AI_PROVIDER_BASE_URL=https://api.openai.com/v1
