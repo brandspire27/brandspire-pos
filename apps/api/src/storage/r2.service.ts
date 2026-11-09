@@ -29,7 +29,7 @@ function matchesFileSignature(contentType: string, body: Buffer) {
 
 @Injectable()
 export class R2Service {
-  private readonly client: S3Client;
+  private readonly storageClient?: S3Client;
   private readonly bucket: string;
 
   constructor() {
@@ -37,14 +37,20 @@ export class R2Service {
     const accessKeyId = (process.env.R2_ACCESS_KEY_ID ?? '').trim();
     const secretAccessKey = (process.env.R2_SECRET_ACCESS_KEY ?? '').trim();
     this.bucket = (process.env.R2_BUCKET_NAME ?? '').trim();
+    if (process.env.FILE_STORAGE_ENABLED === 'false') return;
     if (!accountId || !accessKeyId || !secretAccessKey || !this.bucket) {
       throw new Error('R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and R2_BUCKET_NAME are required');
     }
-    this.client = new S3Client({
+    this.storageClient = new S3Client({
       region: 'auto',
       endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
       credentials: { accessKeyId, secretAccessKey }
     });
+  }
+
+  private get client(): S3Client {
+    if (!this.storageClient) throw new ServiceUnavailableException('File storage is not configured');
+    return this.storageClient;
   }
 
   async uploadBusinessFile(businessId: string, contentType: string, body: Buffer) {

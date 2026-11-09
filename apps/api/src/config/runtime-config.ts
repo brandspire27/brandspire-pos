@@ -63,7 +63,7 @@ export function getRuntimeConfig(): RuntimeConfig {
 
   if (webOrigins.length === 0) throw new Error('WEB_URL or CLIENT_URL must contain at least one allowed origin');
 
-  const publicApiUrl = optionalUrl('API_PUBLIC_URL');
+  const publicApiUrl = optionalUrl('API_PUBLIC_URL') ?? optionalUrl('RENDER_EXTERNAL_URL');
   const clientId = (process.env.CASHFREE_CLIENT_ID ?? '').trim();
   const clientSecret = (process.env.CASHFREE_CLIENT_SECRET ?? '').trim();
   if ((clientId && !clientSecret) || (!clientId && clientSecret)) {
@@ -84,6 +84,8 @@ export function getRuntimeConfig(): RuntimeConfig {
   // Staging and production are both public environments: no localhost or plain HTTP.
   if (appEnv !== 'development') {
     for (const origin of webOrigins) {
+      // Explicit opt-in for testing a hosted API from the local frontend.
+      if (process.env.ALLOW_LOCAL_FRONTEND === 'true' && origin === 'http://localhost:3000') continue;
       if (!origin.startsWith('https://') || /localhost|127\.0\.0\.1|10\.0\.2\.2/i.test(origin)) {
         throw new Error(`${appEnv} WEB_URL/CLIENT_URL must use HTTPS and cannot be local: ${origin}`);
       }
