@@ -14,15 +14,14 @@ pnpm install
 pnpm dev
 ```
 
-## Product rules already represented in this starter
-- Exactly three portals
-- Admin approval before Owner activation
-- Trial/subscription timeline fields
-- Terms acceptance tracking
-- English / Hindi / Hinglish i18n structure
-- 2-inch (58mm), 3-inch (80mm), and A4 printing profiles
-- Tenant-first PostgreSQL schema
-- Supabase RLS starter policies
+## Runtime migration
+The API and web application use Firebase Authentication, Firebase ID-token
+verification, and Turso/libSQL-backed API operations. Cloudflare R2 is the
+private object-storage target. Server-only Firebase Admin, Turso, and R2
+credentials belong in `apps/api/.env`; Firebase browser settings and the API
+base URL belong in `apps/web/.env.local`.
 
-## Next implementation target
-Finish Supabase project wiring, authentication callbacks, backend guards and the first Owner onboarding flow.
+The Android client and some deployment/release documentation still require
+migration from their Supabase configuration. The `supabase/migrations`
+directory is preserved as historical schema lineage. This is a code-only
+migration; it does not copy or modify existing Supabase data.

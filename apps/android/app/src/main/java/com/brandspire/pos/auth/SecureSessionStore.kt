@@ -12,12 +12,11 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /**
- * Stores Supabase session tokens encrypted with an Android Keystore AES/GCM key.
- * The Supabase service-role key must never be stored in this app.
+ * Stores Firebase session tokens encrypted with an Android Keystore AES/GCM key.
  */
 class SecureSessionStore(context: Context) {
-    private val prefs = context.getSharedPreferences("brandspire_secure_session", Context.MODE_PRIVATE)
-    private val alias = "brandspire_pos_session_key_v1"
+    private val prefs = context.getSharedPreferences("brandspire_firebase_session", Context.MODE_PRIVATE)
+    private val alias = "brandspire_pos_firebase_session_key_v1"
 
     fun save(session: AuthSession) {
         val payload = JSONObject().apply {

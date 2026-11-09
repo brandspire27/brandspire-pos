@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { randomUUID } from 'crypto';
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { getRuntimeConfig } from './config/runtime-config';
@@ -9,7 +10,8 @@ import { createSecurityMiddleware } from './common/security/security.middleware'
 async function bootstrap() {
   // rawBody keeps Cashfree webhook signature verification bound to the exact bytes received.
   const config = getRuntimeConfig();
-  const app = await NestFactory.create(AppModule, { rawBody: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
+  app.useBodyParser('json', { limit: '4mb' });
 
   const httpInstance = app.getHttpAdapter().getInstance();
   if (typeof httpInstance?.disable === 'function') httpInstance.disable('x-powered-by');

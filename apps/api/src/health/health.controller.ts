@@ -1,10 +1,10 @@
 import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
-import { SupabaseService } from '../common/supabase.service';
+import { TursoService } from '../database/turso.service';
 import { getRuntimeConfig } from '../config/runtime-config';
 
 @Controller('health')
 export class HealthController {
-  constructor(private readonly supabase: SupabaseService) {}
+  constructor(private readonly database: TursoService) {}
 
   @Get()
   liveness() {
@@ -22,9 +22,11 @@ export class HealthController {
   @Get('ready')
   async readiness() {
     const startedAt = Date.now();
-    const { error } = await this.supabase.admin.from('plans').select('id').limit(1);
-
-    if (error) throw new ServiceUnavailableException('Database readiness check failed');
+    try {
+      await this.database.execute('SELECT id FROM plans LIMIT 1');
+    } catch {
+      throw new ServiceUnavailableException('Database readiness check failed');
+    }
 
     return {
       success: true,

@@ -10,7 +10,7 @@ import android.widget.TextView
 import com.brandspire.pos.auth.SecureSessionStore
 import com.brandspire.pos.data.LocalBillRecord
 import com.brandspire.pos.data.OfflineDatabase
-import com.brandspire.pos.network.SupabaseHttpClient
+import com.brandspire.pos.network.BrandspireApiClient
 import com.brandspire.pos.sync.SyncScheduler
 import com.brandspire.pos.sync.isOnline
 import kotlinx.coroutines.CoroutineScope
@@ -157,7 +157,7 @@ class BillsActivity : Activity() {
         val session = SecureSessionStore(this).read() ?: return
         status.text = tx("Loading server bills…", "Server bills load ho rahe hain…", "सर्वर बिल लोड हो रहे हैं…")
         scope.launch {
-            val result = withContext(Dispatchers.IO) { runCatching { SupabaseHttpClient().fetchInvoices(session.accessToken, organizationId) } }
+            val result = withContext(Dispatchers.IO) { runCatching { BrandspireApiClient().fetchInvoices(session.accessToken, organizationId) } }
             result.onSuccess { rows -> renderServerBills(rows) }
                 .onFailure { status.text = it.message ?: tx("Could not load bills", "Bills load nahi hue", "बिल लोड नहीं हो सके") }
         }

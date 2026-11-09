@@ -50,8 +50,9 @@ let cached: RuntimeConfig | null = null;
 export function getRuntimeConfig(): RuntimeConfig {
   if (cached) return cached;
 
-  requireEnv('SUPABASE_URL');
-  requireEnv('SUPABASE_SERVICE_ROLE_KEY');
+  requireEnv('FIREBASE_PROJECT_ID');
+  requireEnv('TURSO_DATABASE_URL');
+  requireEnv('TURSO_AUTH_TOKEN');
 
   const rawEnv = (process.env.APP_ENV ?? process.env.NODE_ENV ?? 'development').toLowerCase();
   const appEnv: RuntimeConfig['appEnv'] = rawEnv === 'production' ? 'production' : rawEnv === 'staging' ? 'staging' : 'development';

@@ -3,8 +3,10 @@
 import Link from 'next/link';
 import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getSupabaseBrowserClient } from '@/lib/supabase';
+import { getFirebaseAuth } from '@/lib/firebase';
+import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { getPostLoginRoute } from '@/lib/auth-routing';
+import PasswordInput from '@/components/auth/PasswordInput';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -17,11 +19,16 @@ export default function LoginPage() {
     const form = new FormData(event.currentTarget);
     const email = String(form.get('email') ?? '').trim();
     const password = String(form.get('password') ?? '');
-    const supabase = getSupabaseBrowserClient();
-    const { data, error: loginError } = await supabase.auth.signInWithPassword({ email, password });
-    if (loginError || !data.session) { setError(loginError?.message ?? 'Unable to sign in.'); setLoading(false); return; }
-    const route = await getPostLoginRoute(supabase, data.session.access_token);
-    router.push(route);
+    try {
+      await signInWithEmailAndPassword(getFirebaseAuth(), email, password);
+      const route = await getPostLoginRoute();
+      router.push(route);
+    } catch (reason) {
+      await signOut(getFirebaseAuth()).catch(() => undefined);
+      setError(reason instanceof Error ? reason.message : 'Unable to sign in.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -34,7 +41,8 @@ export default function LoginPage() {
         </div>
         <form onSubmit={handleSubmit}>
           <div className="field"><label htmlFor="email">Email address</label><input autoFocus className="input" id="email" name="email" type="email" autoComplete="email" required /></div>
-          <div className="field" style={{ marginTop: 14 }}><label htmlFor="password">Password</label><input className="input" id="password" name="password" type="password" autoComplete="current-password" required /></div>
+          <div className="field" style={{ marginTop: 14 }}><label htmlFor="password">Password</label><PasswordInput id="password" name="password" autoComplete="current-password" required /></div>
+          <div style={{ marginTop: 10, textAlign: 'right' }}><Link href="/auth/forgot-password" style={{ fontWeight: 700, color: '#2343af' }}>Forgot password?</Link></div>
           {error && <div className="form-error">{error}</div>}
           <div className="form-actions"><Link className="btn" href="/">Back</Link><button className="btn btn-primary" disabled={loading} type="submit">{loading ? 'Signing in…' : 'Login securely'}</button></div>
         </form>

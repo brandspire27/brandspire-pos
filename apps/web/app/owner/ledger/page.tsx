@@ -6,7 +6,7 @@ import OwnerShell from '@/components/pos/OwnerShell';
 import WorkspaceLoader from '@/components/pos/WorkspaceLoader';
 import { formatDateTime, formatINR, getCurrentOrganization, type CurrentOrganization } from '@/lib/pos';
 import { phase8Text } from '@/lib/phase8-i18n';
-import { getSupabaseBrowserClient } from '@/lib/supabase';
+import { getCustomerLedger, listCustomers } from '@/lib/pos-api';
 
 type Customer = { id:string; name:string; phone:string|null; outstanding_balance:number };
 type LedgerRow = { event_time:string; event_type:string; reference:string; description:string; debit:number; credit:number; running_balance:number };
@@ -24,16 +24,14 @@ export default function CustomerLedgerPage(){
     if(!current)return router.replace('/auth/login');
     if(current.role!=='OWNER')return router.replace('/staff');
     setOrg(current);
-    const {data,error:customerError}=await getSupabaseBrowserClient().from('customers').select('id,name,phone,outstanding_balance').eq('organization_id',current.organizationId).is('deleted_at',null).order('name').limit(300);
-    if(customerError)setError(customerError.message);else setCustomers((data??[]) as Customer[]);
+    try{const result=await listCustomers('',false,300);setCustomers(result.data as unknown as Customer[]);}catch(reason){setError(reason instanceof Error?reason.message:'Could not load customers.');}
   }).catch(err=>setError(err instanceof Error?err.message:'Could not load workspace.'));},[router]);
 
   const loadLedger=useCallback(async(customerId:string)=>{
     if(!org||!customerId){setLedger([]);return;}
     setLoading(true);setError('');
-    const {data,error:ledgerError}=await getSupabaseBrowserClient().rpc('get_customer_ledger',{p_organization_id:org.organizationId,p_customer_id:customerId});
-    if(ledgerError)setError(ledgerError.message);else setLedger((data??[]) as LedgerRow[]);
-    setLoading(false);
+    try{const result=await getCustomerLedger(customerId);setLedger(result.data.events as unknown as LedgerRow[]);}catch(reason){setError(reason instanceof Error?reason.message:'Could not load customer ledger.');}
+    finally{setLoading(false);}
   },[org]);
 
   useEffect(()=>{void loadLedger(selectedId);},[selectedId,loadLedger]);

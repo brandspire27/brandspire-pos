@@ -11,7 +11,7 @@ import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import com.brandspire.pos.auth.SecureSessionStore
-import com.brandspire.pos.network.SupabaseHttpClient
+import com.brandspire.pos.network.BrandspireApiClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -43,7 +43,7 @@ class DuesPaymentsActivity : Activity() {
     private fun load() {
         val session = SecureSessionStore(this).read() ?: return finish()
         scope.launch {
-            val result = withContext(Dispatchers.IO) { runCatching { SupabaseHttpClient().fetchDueInvoices(session.accessToken, organizationId) } }
+            val result = withContext(Dispatchers.IO) { runCatching { BrandspireApiClient().fetchDueInvoices(session.accessToken, organizationId) } }
             result.onSuccess { renderRows(it) }.onFailure { showError(it.message) }
         }
     }
@@ -100,7 +100,7 @@ class DuesPaymentsActivity : Activity() {
     private fun collect(invoiceId: String, amount: Double, method: String, note: String) {
         val session = SecureSessionStore(this).read() ?: return finish()
         scope.launch {
-            val result = withContext(Dispatchers.IO) { runCatching { SupabaseHttpClient().collectInvoicePayment(session.accessToken, organizationId, invoiceId, amount, method, note) } }
+            val result = withContext(Dispatchers.IO) { runCatching { BrandspireApiClient().collectInvoicePayment(session.accessToken, organizationId, invoiceId, amount, method, note) } }
             result.onSuccess {
                 Toast.makeText(this@DuesPaymentsActivity, MobileText.get(language, "Payment recorded.", "Payment record ho gaya.", "भुगतान दर्ज हो गया।"), Toast.LENGTH_SHORT).show()
                 load()

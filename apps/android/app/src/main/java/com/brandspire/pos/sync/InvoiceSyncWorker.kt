@@ -7,7 +7,7 @@ import com.brandspire.pos.alerts.AlertEngine
 import com.brandspire.pos.auth.SecureSessionStore
 import com.brandspire.pos.auth.WorkspaceCache
 import com.brandspire.pos.data.OfflineDatabase
-import com.brandspire.pos.network.SupabaseHttpClient
+import com.brandspire.pos.network.BrandspireApiClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.Instant
@@ -22,7 +22,7 @@ class InvoiceSyncWorker(appContext: Context, params: WorkerParameters) : Corouti
 
         val store = SecureSessionStore(applicationContext)
         var session = store.read() ?: return@withContext Result.failure()
-        val api = SupabaseHttpClient()
+        val api = BrandspireApiClient()
         if (session.expiresAtEpochSeconds <= Instant.now().epochSecond + 60) {
             session = runCatching { api.refresh(session.refreshToken) }.getOrElse { return@withContext Result.retry() }
             store.save(session)

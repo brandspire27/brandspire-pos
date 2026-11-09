@@ -10,15 +10,14 @@
   },
   "dependencies": {
     "@hookform/resolvers": "latest",
-    "@supabase/ssr": "latest",
-    "@supabase/supabase-js": "latest",
     "@tanstack/react-query": "latest",
+    "firebase": "latest",
+    "jspdf": "^3.0.2",
     "next": "latest",
     "react": "latest",
     "react-dom": "latest",
     "react-hook-form": "latest",
-    "zod": "latest",
-    "jspdf": "^3.0.2"
+    "zod": "latest"
   },
   "devDependencies": {
     "@types/node": "latest",

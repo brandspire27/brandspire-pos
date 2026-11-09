@@ -8,7 +8,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import com.brandspire.pos.auth.SecureSessionStore
-import com.brandspire.pos.network.SupabaseHttpClient
+import com.brandspire.pos.network.BrandspireApiClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -46,7 +46,7 @@ class OwnerReportsActivity : Activity() {
         val from = to.minus(days.toLong(), ChronoUnit.DAYS)
         scope.launch {
             val result = withContext(Dispatchers.IO) { runCatching {
-                val api = SupabaseHttpClient()
+                val api = BrandspireApiClient()
                 api.ownerReportSummary(session.accessToken, organizationId, from.toString(), to.toString()) to
                     api.ownerGstReportSummary(session.accessToken, organizationId, from.toString(), to.toString())
             } }

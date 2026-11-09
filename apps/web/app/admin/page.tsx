@@ -3,7 +3,8 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getSupabaseBrowserClient } from '@/lib/supabase';
+import { getFirebaseAuth } from '@/lib/firebase';
+import { signOut } from 'firebase/auth';
 import { adminDate, adminMoney, adminRequest } from '@/lib/admin-api';
 
 type Application = {
@@ -156,7 +157,7 @@ export default function AdminPage() {
   }
 
   async function logout() {
-    await getSupabaseBrowserClient().auth.signOut();
+    await signOut(getFirebaseAuth());
     router.push('/auth/login');
   }
 

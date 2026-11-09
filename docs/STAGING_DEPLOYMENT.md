@@ -1,24 +1,33 @@
 # Brandspire POS — Staging Deployment
 
-Use staging as a disposable pre-production environment. Never point staging at the production Supabase database.
+Use staging as a disposable pre-production environment. Keep staging Firebase,
+Turso, and R2 resources separate from production; do not copy production secrets.
 
 ## Recommended layout
 
 - Web: Vercel staging project / preview domain
 - API: container host such as Northflank using `apps/api/Dockerfile`
-- Database/Auth: separate Supabase staging project
+- Auth: separate Firebase staging project
+- Structured data: separate Turso staging database
+- File storage: private Cloudflare R2 staging bucket
 - Payments: Cashfree Sandbox only
-- Android: staging APK pointing to staging Supabase + staging API
+- Android migration is not complete; its current build/runtime configuration still references Supabase.
 
-## 1. Create a separate Supabase staging project
+## 1. Configure staging services
 
-Run migrations `0001` through `0011` in numeric order. Create only test Admin/Owner/Staff accounts. Do not copy production service-role keys into client apps.
+Create a Firebase staging project, Turso database, and private R2 bucket. Apply
+the API migrations from `apps/api/migrations` in numeric order. The retained
+`supabase/migrations` directory is historical only. Create only test
+Admin/Owner/Staff accounts.
 
 ## 2. Deploy the API
 
 Use repository root as Docker build context and `apps/api/Dockerfile` as the Dockerfile.
 
-Set environment values from `apps/api/.env.staging.example`. `APP_ENV=staging` is required. Set `WEB_URL` to the final staging web URL and `API_PUBLIC_URL` to the final public API URL.
+Set environment values from `apps/api/.env.staging.example`, including Firebase
+Admin credentials, Turso credentials, and R2 credentials. `APP_ENV=staging` is
+required. Set `WEB_URL` to the final staging web URL and `API_PUBLIC_URL` to the
+final public API URL.
 
 Health checks:
 
@@ -36,7 +45,8 @@ After the web URL is known, ensure the API `WEB_URL` exactly matches it (no trai
 
 ## 4. Build a staging Android APK
 
-Copy the three entries from `apps/android/gradle.staging.properties.example` into local `apps/android/gradle.properties`, then build the APK. The API URL must be public HTTPS; do not use `10.0.2.2` or a laptop LAN address for staging.
+Android still contains Supabase-backed client paths and must not be considered
+migrated or released against this target architecture yet.
 
 ## 5. Run smoke checks
 

@@ -1,12 +1,14 @@
 'use client';
 
-import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import OwnerShell from '@/components/pos/OwnerShell';
 import StaffShell from '@/components/pos/StaffShell';
 import WorkspaceLoader from '@/components/pos/WorkspaceLoader';
+import PosAssist from '@/components/pos/PosAssist';
+import BillingQuickAdd from '@/components/pos/BillingQuickAdd';
 import { formatINR, getCurrentOrganization, isSubscriptionUsable, type CurrentOrganization } from '@/lib/pos';
-import { getSupabaseBrowserClient } from '@/lib/supabase';
+import { createInvoice, getBillingPolicy, listCustomers, listProducts } from '@/lib/pos-api';
 import { posText } from '@/lib/pos-i18n';
 
 type Product={id:string;name:string;sku:string|null;barcode:string|null;selling_price:number;tax_rate:number;tax_inclusive:boolean;stock:number;unit:string};
@@ -14,8 +16,6 @@ type Customer={id:string;name:string;phone:string|null};
 type CartItem=Product&{quantity:number};
 type Props={portal:'owner'|'staff'};
 type BillingPolicy={allowStaffDiscount:boolean;staffDiscountLimit:number;defaultPayment:string};
-
-const PRODUCT_COLUMNS='id,name,sku,barcode,selling_price,tax_rate,tax_inclusive,stock,unit';
 
 function mergeProducts(...lists:Product[][]){
   const byId=new Map<string,Product>();
@@ -38,31 +38,34 @@ export default function BillingWorkspace({portal}:Props){
   const[amountPaid,setAmountPaid]=useState('');
   const[policy,setPolicy]=useState<BillingPolicy>({allowStaffDiscount:false,staffDiscountLimit:0,defaultPayment:'CASH'});
   const[creating,setCreating]=useState(false);
+  const pendingInvoice=useRef<{fingerprint:string;id:string}|null>(null);
+  const submitting=useRef(false);
   const[catalogBusy,setCatalogBusy]=useState(false);
   const[error,setError]=useState('');
   const[success,setSuccess]=useState<{id:string;invoiceNumber:string;total:number}|null>(null);
 
   useEffect(()=>{
     async function load(){
+      try {
       const current=await getCurrentOrganization();
       if(!current)return router.replace('/auth/login');
       const expected=portal==='owner'?'OWNER':'STAFF';
       if(current.role!==expected)return router.replace(current.role==='OWNER'?'/owner/billing':'/staff/billing');
       if(!isSubscriptionUsable(current.subscriptionStatus,current.endsAt))return router.replace(current.role==='OWNER'?'/owner':'/staff');
       setOrg(current);
-      const supabase=getSupabaseBrowserClient();
-      const[productResult,customerResult,settingsResult]=await Promise.all([
-        supabase.from('products').select(PRODUCT_COLUMNS).eq('organization_id',current.organizationId).eq('active',true).is('deleted_at',null).order('name').limit(250),
-        supabase.from('customers').select('id,name,phone').eq('organization_id',current.organizationId).eq('active',true).is('deleted_at',null).order('name').limit(400),
-        supabase.from('organization_settings').select('allow_staff_discount,staff_discount_limit,default_payment_method').eq('organization_id',current.organizationId).single()
-      ]);
-      if(productResult.error)setError('Could not load the product catalog. Please retry.');
-      if(customerResult.error)setError('Could not load customers. Please retry.');
-      setProducts((productResult.data??[]) as Product[]);
-      setCustomers((customerResult.data??[]) as Customer[]);
-      if(settingsResult.data){
-        const next={allowStaffDiscount:Boolean(settingsResult.data.allow_staff_discount),staffDiscountLimit:Number(settingsResult.data.staff_discount_limit??0),defaultPayment:String(settingsResult.data.default_payment_method??'CASH')};
-        setPolicy(next);setPaymentMethod(next.defaultPayment);
+      try {
+        const [productResult, customerResult, settingsResult] = await Promise.all([
+          listProducts('', true, 250), listCustomers('', true, 400), getBillingPolicy()
+        ]);
+        setProducts(productResult.data as unknown as Product[]);
+        setCustomers(customerResult.data as unknown as Customer[]);
+        const next = settingsResult.data;
+        setPolicy(next); setPaymentMethod(next.defaultPayment);
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : 'Could not load products and customers.');
+      }
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : 'Could not load your workspace.');
       }
     }
     load();
@@ -75,16 +78,15 @@ export default function BillingWorkspace({portal}:Props){
     let active=true;
     const timer=window.setTimeout(async()=>{
       setCatalogBusy(true);
-      const supabase=getSupabaseBrowserClient();
-      const [nameResult,barcodeResult,skuResult]=await Promise.all([
-        supabase.from('products').select(PRODUCT_COLUMNS).eq('organization_id',org.organizationId).eq('active',true).is('deleted_at',null).ilike('name',`%${text}%`).order('name').limit(30),
-        supabase.from('products').select(PRODUCT_COLUMNS).eq('organization_id',org.organizationId).eq('active',true).is('deleted_at',null).eq('barcode',text).limit(3),
-        supabase.from('products').select(PRODUCT_COLUMNS).eq('organization_id',org.organizationId).eq('active',true).is('deleted_at',null).eq('sku',text).limit(3)
-      ]);
-      if(!active)return;
-      const data=mergeProducts((nameResult.data??[]) as Product[],(barcodeResult.data??[]) as Product[],(skuResult.data??[]) as Product[]);
-      setRemoteProducts(data);
-      setCatalogBusy(false);
+      try {
+        const result = await listProducts(text, true, 50);
+        if(!active)return;
+        setRemoteProducts(result.data as unknown as Product[]);
+      } catch {
+        if(active)setRemoteProducts([]);
+      } finally {
+        if(active)setCatalogBusy(false);
+      }
     },240);
     return()=>{active=false;window.clearTimeout(timer);};
   },[query,org]);
@@ -135,39 +137,74 @@ export default function BillingWorkspace({portal}:Props){
     if(filteredProducts.length===1){addProduct(filteredProducts[0]);return;}
     if(!org)return;
     setCatalogBusy(true);
-    const supabase=getSupabaseBrowserClient();
-    const[barcodeResult,skuResult]=await Promise.all([
-      supabase.from('products').select(PRODUCT_COLUMNS).eq('organization_id',org.organizationId).eq('active',true).is('deleted_at',null).eq('barcode',raw).limit(1),
-      supabase.from('products').select(PRODUCT_COLUMNS).eq('organization_id',org.organizationId).eq('active',true).is('deleted_at',null).eq('sku',raw).limit(1)
-    ]);
-    setCatalogBusy(false);
-    const found=((barcodeResult.data?.[0]??skuResult.data?.[0]) as Product|undefined);
-    if(found){setProducts(current=>mergeProducts(current,[found]));addProduct(found);}
+    try {
+      const result=await listProducts(raw,true,30);
+      const found=(result.data as unknown as Product[]).find(product=>
+        String(product.barcode??'').toLowerCase()===lowered||String(product.sku??'').toLowerCase()===lowered
+      );
+      if(found){setProducts(current=>mergeProducts(current,[found]));addProduct(found);}
+    } catch (reason) {
+      setError(reason instanceof Error?reason.message:'Could not search products.');
+    } finally {
+      setCatalogBusy(false);
+    }
   }
 
   async function createBill(){
-    if(!org||cart.length===0)return;
+    if(!org||cart.length===0||submitting.current)return;
+    submitting.current=true;
     setCreating(true);setError('');setSuccess(null);
     const paid=amountPaid===''?null:Number(amountPaid);
-    const{data,error:rpcError}=await getSupabaseBrowserClient().rpc('create_pos_invoice',{
-      p_organization_id:org.organizationId,p_customer_id:customerId||null,p_items:cart.map(item=>({product_id:item.id,quantity:item.quantity})),p_discount_type:effectiveType,p_discount_value:effectiveDiscount,p_payment_method:paymentMethod,p_amount_paid:paid,p_client_invoice_id:crypto.randomUUID()
-    });
-    setCreating(false);
-    if(rpcError)return setError('Bill could not be created. Please check stock/network and retry.');
-    const result=Array.isArray(data)?data[0]:data;
-    setSuccess({id:result?.invoice_id??'',invoiceNumber:result?.invoice_number??'Created',total:Number(result?.grand_total??estimated.total)});
-    setCart([]);setCustomerId('');setDiscountValue('0');setAmountPaid('');
-    const{data:refreshed}=await getSupabaseBrowserClient().from('products').select(PRODUCT_COLUMNS).eq('organization_id',org.organizationId).eq('active',true).is('deleted_at',null).order('name').limit(250);
-    setProducts((refreshed??[]) as Product[]);
+    try {
+      const input={
+        customerId:customerId||null,
+        items:cart.map(item=>({productId:item.id,quantity:item.quantity})),
+        discountType:effectiveType,
+        discountValue:effectiveDiscount,
+        paymentMethod,
+        amountPaid:paid
+      };
+      const fingerprint=JSON.stringify(input);
+      if(pendingInvoice.current?.fingerprint!==fingerprint)pendingInvoice.current={fingerprint,id:crypto.randomUUID()};
+      const response=await createInvoice({...input,clientInvoiceId:pendingInvoice.current.id});
+      pendingInvoice.current=null;
+      const result=response.data;
+      setSuccess({id:result.invoice_id,invoiceNumber:result.invoice_number,total:Number(result.grand_total??estimated.total)});
+      setCart([]);setCustomerId('');setDiscountValue('0');setAmountPaid('');
+      try {
+        const refreshed=await listProducts('',true,250);
+        setProducts(refreshed.data as unknown as Product[]);
+      } catch { setError('Bill saved successfully. Refresh the catalog before creating another bill.'); }
+    } catch (reason) {
+      setError(reason instanceof Error?reason.message:'Bill could not be created. Please check stock/network and retry.');
+    } finally {
+      setCreating(false);
+      submitting.current=false;
+    }
   }
 
-  if(!org)return <WorkspaceLoader/>;
+  if(!org)return error?<main className="card"><p className="form-error" role="alert">{error}</p><button className="btn" onClick={()=>window.location.reload()}>Retry</button></main>:<WorkspaceLoader/>;
   const Shell=portal==='owner'?OwnerShell:StaffShell;
   const base=portal==='owner'?'/owner':'/staff';
   const t=posText(org.preferredLanguage);
   const searchStatus=org.preferredLanguage==='hi'?'पूरे कैटलॉग में खोज रहे हैं…':org.preferredLanguage==='hinglish'?'Poore catalog mein search ho raha hai…':'Searching the full catalog…';
 
   return <Shell businessName={org.organizationName} language={org.preferredLanguage}>
+    <BillingQuickAdd hindi={org.preferredLanguage!=='en'} disabled={creating} onCustomer={customer=>{setCustomers(current=>[customer,...current]);setCustomerId(customer.id);}} onProduct={product=>{setProducts(current=>mergeProducts(current,[product]));addProduct(product);}}/>
+    <PosAssist mode="bill" onDraft={draft=>{
+      if(creating)throw new Error('Wait for the current bill to finish saving.');
+      const items=draft.items as {product:Product;quantity:number}[];
+      const next=[...cart];
+      for(const item of items){
+        const index=next.findIndex(row=>row.id===item.product.id);
+        const quantity=item.quantity+(index<0?0:next[index].quantity);
+        if(quantity>Number(item.product.stock))throw new Error(`Insufficient stock for ${item.product.name}. Review the current cart first.`);
+        const row={...item.product,quantity};
+        if(index<0)next.push(row);else next[index]=row;
+      }
+      setCart(next);
+      setSuccess(null);setError('');
+    }}/>
     <div className="content-head pos-page-head"><div><span className="page-kicker">{portal==='staff'?t.counterKickerStaff:t.counterKickerOwner}</span><h1>{portal==='staff'?t.counterStaffTitle:t.counterOwnerTitle}</h1><p>{t.counterSub}</p></div><div className="counter-shortcut" aria-hidden="true">↵ <span>{t.searchFocused}</span></div></div>
     {error&&<div className="form-error" role="alert">{error}</div>}
     {success&&<div className="bill-success" role="status"><div><span>{t.billCreated}</span><h2>{success.invoiceNumber}</h2><p>{formatINR(success.total)} · {t.stockUpdated}</p></div><div className="hero-actions" style={{marginTop:0}}>{success.id&&<button className="btn btn-primary" onClick={()=>router.push(`${base}/invoices/${success.id}`)}>{t.viewPrint}</button>}<button className="btn" onClick={()=>setSuccess(null)}>{t.newBill}</button></div></div>}

@@ -12,6 +12,7 @@ function sweep(now: number) {
 }
 
 function routeKey(path: string) {
+  if (path.includes('/api/pos/assist/draft')) return 'pos-assist';
   if (path.includes('/payments/cashfree/webhook')) return 'cashfree-webhook';
   if (path.includes('/subscription/checkout')) return 'subscription-checkout';
   if (path.startsWith('/api/admin')) return 'admin';
@@ -20,6 +21,7 @@ function routeKey(path: string) {
 }
 
 function routeLimit(path: string, method: string) {
+  if (path.includes('/api/pos/assist/draft')) return { max: 12, windowMs: 60_000 };
   if (path.includes('/payments/cashfree/webhook')) return { max: 240, windowMs: 60_000 };
   if (path.includes('/subscription/checkout')) return { max: 24, windowMs: 60_000 };
   if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && (path.startsWith('/api/admin') || path.startsWith('/api/owner'))) {
@@ -54,7 +56,7 @@ export function createSecurityMiddleware(appEnv: string) {
     }
 
     // Authenticated SaaS and payment responses must not be stored in shared browser/proxy caches.
-    if (path.startsWith('/api/admin') || path.startsWith('/api/owner') || path.startsWith('/api/payments')) {
+    if (path.startsWith('/api/admin') || path.startsWith('/api/owner') || path.startsWith('/api/payments') || path.startsWith('/api/pos') || path.startsWith('/api/auth')) {
       res.setHeader('Cache-Control', 'no-store, max-age=0');
       res.setHeader('Pragma', 'no-cache');
     }

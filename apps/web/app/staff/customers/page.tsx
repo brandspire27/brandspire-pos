@@ -6,17 +6,17 @@ import StaffShell from '@/components/pos/StaffShell';
 import WorkspaceLoader from '@/components/pos/WorkspaceLoader';
 import { getCurrentOrganization, isSubscriptionUsable, type CurrentOrganization } from '@/lib/pos';
 import { posText } from '@/lib/pos-i18n';
-import { getSupabaseBrowserClient } from '@/lib/supabase';
+import { addCustomer as createCustomer, listCustomers } from '@/lib/pos-api';
 
 type Customer={id:string;name:string;phone:string|null;email:string|null;state:string|null;gstin:string|null;created_at:string};
 const emptyForm={name:'',phone:'',email:'',address:'',state:'',gstin:'',notes:''};
 export default function StaffCustomersPage(){
   const router=useRouter();const[org,setOrg]=useState<CurrentOrganization|null>(null);const[customers,setCustomers]=useState<Customer[]>([]);const[query,setQuery]=useState('');const[form,setForm]=useState(emptyForm);const[showForm,setShowForm]=useState(true);const[saving,setSaving]=useState(false);const[error,setError]=useState('');
-  const loadCustomers=useCallback(async(organizationId:string)=>{const{data,error:loadError}=await getSupabaseBrowserClient().from('customers').select('id,name,phone,email,state,gstin,created_at').eq('organization_id',organizationId).eq('active',true).is('deleted_at',null).order('created_at',{ascending:false}).limit(150);if(loadError)throw loadError;setCustomers((data??[]) as Customer[]);},[]);
+  const loadCustomers=useCallback(async(organizationId:string)=>{void organizationId;const{data}=await listCustomers('',true,150);setCustomers(data as unknown as Customer[]);},[]);
   useEffect(()=>{getCurrentOrganization().then(async current=>{if(!current)return router.replace('/auth/login');if(current.role!=='STAFF')return router.replace('/owner/customers');if(!isSubscriptionUsable(current.subscriptionStatus,current.endsAt))return router.replace('/staff');setOrg(current);try{await loadCustomers(current.organizationId);}catch(err){setError(err instanceof Error?err.message:'Could not load customers.');}});},[loadCustomers,router]);
   const filtered=useMemo(()=>{const text=query.toLowerCase().trim();if(!text)return customers;return customers.filter(c=>[c.name,c.phone,c.email,c.gstin].some(v=>String(v??'').toLowerCase().includes(text)));},[customers,query]);
   const t=posText(org?.preferredLanguage??'en');
-  async function addCustomer(event:FormEvent){event.preventDefault();if(!org||!form.name.trim())return;setSaving(true);setError('');const{error:insertError}=await getSupabaseBrowserClient().from('customers').insert({organization_id:org.organizationId,name:form.name.trim(),phone:form.phone.trim()||null,email:form.email.trim()||null,address:form.address.trim()||null,state:form.state.trim()||null,gstin:form.gstin.trim().toUpperCase()||null,notes:form.notes.trim()||null});setSaving(false);if(insertError)return setError(insertError.message);setForm(emptyForm);setShowForm(false);await loadCustomers(org.organizationId);}
+  async function addCustomer(event:FormEvent){event.preventDefault();if(!org||!form.name.trim())return;setSaving(true);setError('');try{await createCustomer({name:form.name.trim(),phone:form.phone.trim()||null,email:form.email.trim()||null,address:form.address.trim()||null,state:form.state.trim()||null,gstin:form.gstin.trim().toUpperCase()||null,notes:form.notes.trim()||null});setForm(emptyForm);setShowForm(false);await loadCustomers(org.organizationId);}catch(reason){setError(reason instanceof Error?reason.message:'Could not save customer.');}finally{setSaving(false);}}
   if(!org)return <WorkspaceLoader/>;
   return <StaffShell businessName={org.organizationName} language={org.preferredLanguage}>
     <div className="content-head pos-page-head"><div><span className="page-kicker">{t.staffCustomersKicker}</span><h1>{t.staffCustomersTitle}</h1><p>{t.staffCustomersSub}</p></div><button className="btn btn-primary" onClick={()=>setShowForm(v=>!v)}>{showForm?t.close:`+ ${t.addCustomer}`}</button></div>{error&&<div className="form-error">{error}</div>}

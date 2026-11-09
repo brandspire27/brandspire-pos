@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import OwnerShell from '@/components/pos/OwnerShell';
 import WorkspaceLoader from '@/components/pos/WorkspaceLoader';
 import { getCurrentOrganization, type CurrentOrganization } from '@/lib/pos';
-import { getSupabaseBrowserClient } from '@/lib/supabase';
+import { getOrganizationSettings, updateOrganizationSettings } from '@/lib/pos-api';
 import { posText, type PosLanguage } from '@/lib/pos-i18n';
 
 type Settings = {
@@ -72,22 +72,9 @@ export default function OwnerSettingsPage() {
         if (current.role !== 'OWNER') return router.replace('/staff');
         setOrg(current);
 
-        const supabase = getSupabaseBrowserClient();
-        const [orgResult, settingsResult] = await Promise.all([
-          supabase.from('organizations')
-            .select('name,phone,email,gstin,address,city,state,pincode,preferred_language')
-            .eq('id', current.organizationId)
-            .single(),
-          supabase.from('organization_settings')
-            .select('invoice_prefix,default_print_format,default_payment_method,negative_stock_enabled,allow_staff_discount,staff_discount_limit,receipt_header,receipt_footer,invoice_footer,show_gstin_on_receipt,print_copies')
-            .eq('organization_id', current.organizationId)
-            .single()
-        ]);
-
-        if (orgResult.error) throw orgResult.error;
-        if (settingsResult.error) throw settingsResult.error;
-
-        const o = orgResult.data;
+        const response = await getOrganizationSettings();
+        const values = response.data;
+        const o = values;
         setBusiness({
           name: text(o?.name),
           phone: text(o?.phone),
@@ -100,18 +87,18 @@ export default function OwnerSettingsPage() {
           preferred_language: ((o?.preferred_language ?? 'en') as PosLanguage)
         });
 
-        const s = settingsResult.data;
+        const s = values;
         setSettings({
           invoice_prefix: text(s?.invoice_prefix) || defaultSettings.invoice_prefix,
           default_print_format: (s?.default_print_format ?? defaultSettings.default_print_format) as Settings['default_print_format'],
           default_payment_method: (s?.default_payment_method ?? defaultSettings.default_payment_method) as Settings['default_payment_method'],
-          negative_stock_enabled: s?.negative_stock_enabled ?? defaultSettings.negative_stock_enabled,
-          allow_staff_discount: s?.allow_staff_discount ?? defaultSettings.allow_staff_discount,
+          negative_stock_enabled: Boolean(s?.negative_stock_enabled ?? defaultSettings.negative_stock_enabled),
+          allow_staff_discount: Boolean(s?.allow_staff_discount ?? defaultSettings.allow_staff_discount),
           staff_discount_limit: Number(s?.staff_discount_limit ?? defaultSettings.staff_discount_limit),
           receipt_header: text(s?.receipt_header),
           receipt_footer: text(s?.receipt_footer) || defaultSettings.receipt_footer,
           invoice_footer: text(s?.invoice_footer) || defaultSettings.invoice_footer,
-          show_gstin_on_receipt: s?.show_gstin_on_receipt ?? defaultSettings.show_gstin_on_receipt,
+          show_gstin_on_receipt: Boolean(s?.show_gstin_on_receipt ?? defaultSettings.show_gstin_on_receipt),
           print_copies: Number(s?.print_copies ?? defaultSettings.print_copies)
         });
       } catch (err) {
@@ -129,32 +116,24 @@ export default function OwnerSettingsPage() {
     setSaving(true); setError(''); setSuccess('');
 
     try {
-      const supabase = getSupabaseBrowserClient();
-      const [orgResult, settingsResult] = await Promise.all([
-        supabase.from('organizations').update({
-          name: text(business.name).trim(),
-          phone: text(business.phone).trim() || null,
-          email: text(business.email).trim() || null,
-          gstin: text(business.gstin).trim().toUpperCase() || null,
-          address: text(business.address).trim() || null,
-          city: text(business.city).trim() || null,
-          state: text(business.state).trim() || null,
-          pincode: text(business.pincode).trim() || null,
-          preferred_language: business.preferred_language
-        }).eq('id', org.organizationId),
-        supabase.from('organization_settings').update({
-          ...settings,
-          invoice_prefix: text(settings.invoice_prefix).trim().toUpperCase() || 'BSP',
-          receipt_header: text(settings.receipt_header),
-          receipt_footer: text(settings.receipt_footer),
-          invoice_footer: text(settings.invoice_footer),
-          staff_discount_limit: Number(settings.staff_discount_limit || 0),
-          print_copies: Number(settings.print_copies || 1)
-        }).eq('organization_id', org.organizationId)
-      ]);
-
-      if (orgResult.error) throw orgResult.error;
-      if (settingsResult.error) throw settingsResult.error;
+      await updateOrganizationSettings({
+        ...business,
+        ...settings,
+        name: text(business.name).trim(),
+        phone: text(business.phone).trim() || null,
+        email: text(business.email).trim() || null,
+        gstin: text(business.gstin).trim().toUpperCase() || null,
+        address: text(business.address).trim() || null,
+        city: text(business.city).trim() || null,
+        state: text(business.state).trim() || null,
+        pincode: text(business.pincode).trim() || null,
+        invoice_prefix: text(settings.invoice_prefix).trim().toUpperCase() || 'BSP',
+        receipt_header: text(settings.receipt_header),
+        receipt_footer: text(settings.receipt_footer),
+        invoice_footer: text(settings.invoice_footer),
+        staff_discount_limit: Number(settings.staff_discount_limit || 0),
+        print_copies: Number(settings.print_copies || 1)
+      });
       setSuccess(posText(business.preferred_language).settingsSaved);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save settings.');

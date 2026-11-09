@@ -1,6 +1,6 @@
 import { BadGatewayException, BadRequestException, Injectable, ServiceUnavailableException } from '@nestjs/common';
-import { createHash, createHmac, timingSafeEqual } from 'crypto';
-import { SupabaseService } from '../common/supabase.service';
+import { createHash, createHmac, randomUUID, timingSafeEqual } from 'crypto';
+import { TursoService } from '../database/turso.service';
 import { getRuntimeConfig } from '../config/runtime-config';
 
 type BillingCycle = 'MONTHLY' | 'YEARLY';
@@ -47,7 +47,7 @@ type CashfreeWebhook = {
 export class CashfreeService {
   private readonly apiVersion = '2025-01-01';
 
-  constructor(private readonly supabase: SupabaseService) {}
+  constructor(private readonly database: TursoService) {}
 
   isConfigured() {
     const config = getRuntimeConfig();
@@ -174,14 +174,15 @@ export class CashfreeService {
       throw new ServiceUnavailableException('Cashfree Sandbox is not configured yet');
     }
 
-    const { data: plan, error: planError } = await this.supabase.admin
-      .from('plans')
-      .select('id, code, name, monthly_price, yearly_price, currency, provider_monthly_plan_id, provider_yearly_plan_id, active')
-      .eq('id', planId)
-      .eq('active', true)
-      .maybeSingle();
-
-    if (planError) throw new BadRequestException(planError.message);
+    const planResult = await this.database.execute(
+      `SELECT id, code, name, monthly_price, yearly_price, currency, provider_monthly_plan_id, provider_yearly_plan_id
+       FROM plans WHERE id = ? AND active = 1 LIMIT 1`,
+      [planId]
+    );
+    const plan = planResult.rows[0] as unknown as {
+      id:string; code:string; name:string; monthly_price:number|null; yearly_price:number|null; currency:string;
+      provider_monthly_plan_id:string|null; provider_yearly_plan_id:string|null
+    } | undefined;
     if (!plan) throw new BadRequestException('Subscription plan not found');
 
     const providerPlanId = cycle === 'MONTHLY' ? plan.provider_monthly_plan_id : plan.provider_yearly_plan_id;
@@ -189,13 +190,12 @@ export class CashfreeService {
       throw new BadRequestException(`Cashfree ${cycle.toLowerCase()} plan is not synced by Brandspire Admin yet`);
     }
 
-    const { data: organization, error: organizationError } = await this.supabase.admin
-      .from('organizations')
-      .select('name, phone, email')
-      .eq('id', organizationId)
-      .maybeSingle();
-
-    if (organizationError) throw new BadRequestException(organizationError.message);
+    const organizationResult = await this.database.execute(
+      `SELECT name, phone, email FROM organizations WHERE id = ? LIMIT 1`,
+      [organizationId]
+    );
+    const organization = organizationResult.rows[0] as unknown as { name:string; phone:string; email:string } | undefined;
+    if (!organization) throw new BadRequestException('Organization not found');
     const customerPhone = String(organization?.phone ?? '').replace(/\D/g, '').slice(-10);
     if (!/^[6-9]\d{9}$/.test(customerPhone)) {
       throw new BadRequestException('A valid 10-digit business phone number is required before starting Cashfree checkout');
@@ -231,27 +231,17 @@ export class CashfreeService {
     }
 
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    const { data: session, error: sessionError } = await this.supabase.admin
-      .from('subscription_checkout_sessions')
-      .insert({
-        organization_id: organizationId,
-        plan_id: plan.id,
-        created_by: ownerUserId,
-        billing_cycle: cycle,
-        amount,
-        currency: plan.currency ?? 'INR',
-        provider: 'CASHFREE',
-        provider_subscription_id: providerSubscriptionId,
-        status: 'CREATED',
-        expires_at: expiresAt
-      })
-      .select('id')
-      .single();
-
-    if (sessionError) throw new BadRequestException(sessionError.message);
+    const sessionId = randomUUID();
+    await this.database.execute(
+      `INSERT INTO subscription_checkout_sessions(
+        id, organization_id, plan_id, created_by, billing_cycle, amount, currency, provider,
+        provider_subscription_id, status, expires_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'CASHFREE', ?, 'CREATED', ?)`,
+      [sessionId, organizationId, plan.id, ownerUserId, cycle, amount, plan.currency ?? 'INR', providerSubscriptionId, expiresAt]
+    );
 
     return {
-      sessionId: session.id,
+      sessionId,
       subscriptionSessionId,
       subscriptionId: providerSubscriptionId,
       planName: plan.name,
@@ -267,16 +257,13 @@ export class CashfreeService {
   }
 
   async verifyCheckout(organizationId: string, ownerUserId: string, providerSubscriptionId: string) {
-    const { data: session, error } = await this.supabase.admin
-      .from('subscription_checkout_sessions')
-      .select('id, organization_id, plan_id, billing_cycle, amount, currency, provider_subscription_id, status')
-      .eq('organization_id', organizationId)
-      .eq('created_by', ownerUserId)
-      .eq('provider', 'CASHFREE')
-      .eq('provider_subscription_id', providerSubscriptionId)
-      .maybeSingle();
-
-    if (error) throw new BadRequestException(error.message);
+    const sessionResult = await this.database.execute(
+      `SELECT id, organization_id, plan_id, billing_cycle, amount, currency, provider_subscription_id, status
+       FROM subscription_checkout_sessions
+       WHERE organization_id = ? AND created_by = ? AND provider = 'CASHFREE' AND provider_subscription_id = ? LIMIT 1`,
+      [organizationId, ownerUserId, providerSubscriptionId]
+    );
+    const session = sessionResult.rows[0] as unknown as { id:string; plan_id:string|null; billing_cycle:string } | undefined;
     if (!session) throw new BadRequestException('Cashfree subscription checkout session not found');
 
     const providerSubscription = await this.fetchSubscription(providerSubscriptionId);
@@ -295,9 +282,10 @@ export class CashfreeService {
       providerSubscription.subscription_status ??
       'PENDING';
 
-    await this.supabase.admin.from('subscription_checkout_sessions').update({
-      status: ['ACTIVE', 'AUTHENTICATED'].includes(String(authorizationStatus).toUpperCase()) ? 'ACTIVATED' : 'VERIFIED'
-    }).eq('id', session.id);
+    await this.database.execute(
+      `UPDATE subscription_checkout_sessions SET status = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?`,
+      [['ACTIVE', 'AUTHENTICATED'].includes(String(authorizationStatus).toUpperCase()) ? 'ACTIVATED' : 'VERIFIED', session.id]
+    );
 
     return {
       verified: true,
@@ -357,18 +345,15 @@ export class CashfreeService {
       ''
     ) || null;
 
-    const { error: claimError } = await this.supabase.admin.from('payment_webhook_events').insert({
-      provider: 'CASHFREE',
-      provider_event_id: eventId,
-      event_type: eventType,
-      provider_subscription_id: providerSubscriptionId,
-      payload_hash: payloadHash,
-      processing_status: 'RECEIVED'
-    });
-
-    if (claimError) {
-      if (claimError.code === '23505') return { duplicate: true };
-      throw new BadRequestException(claimError.message);
+    try {
+      await this.database.execute(
+        `INSERT INTO payment_webhook_events(id, provider, provider_event_id, event_type, provider_subscription_id, payload_hash, processing_status)
+         VALUES (?, 'CASHFREE', ?, ?, ?, ?, 'RECEIVED')`,
+        [randomUUID(), eventId, eventType, providerSubscriptionId, payloadHash]
+      );
+    } catch (error) {
+      if (/unique|constraint/i.test(error instanceof Error ? error.message : String(error))) return { duplicate: true };
+      throw new BadRequestException('Could not register Cashfree webhook event');
     }
 
     try {
@@ -376,19 +361,20 @@ export class CashfreeService {
       let localSubscriptionId: string | null = null;
 
       if (providerSubscriptionId) {
-        const { data: checkout } = await this.supabase.admin
-          .from('subscription_checkout_sessions')
-          .select('organization_id, plan_id, billing_cycle')
-          .eq('provider', 'CASHFREE')
-          .eq('provider_subscription_id', providerSubscriptionId)
-          .maybeSingle();
-
-        const { data: localSubscription } = await this.supabase.admin
-          .from('subscriptions')
-          .select('id, organization_id')
-          .eq('provider', 'CASHFREE')
-          .eq('provider_subscription_id', providerSubscriptionId)
-          .maybeSingle();
+        const [checkoutResult, localResult] = await Promise.all([
+          this.database.execute(
+            `SELECT organization_id, plan_id, billing_cycle FROM subscription_checkout_sessions
+             WHERE provider = 'CASHFREE' AND provider_subscription_id = ? LIMIT 1`,
+            [providerSubscriptionId]
+          ),
+          this.database.execute(
+            `SELECT id, organization_id FROM subscriptions
+             WHERE provider = 'CASHFREE' AND provider_subscription_id = ? LIMIT 1`,
+            [providerSubscriptionId]
+          )
+        ]);
+        const checkout = checkoutResult.rows[0] as unknown as { organization_id:string; plan_id:string|null; billing_cycle:string } | undefined;
+        const localSubscription = localResult.rows[0] as unknown as { id:string; organization_id:string } | undefined;
 
         organizationId = checkout?.organization_id ?? localSubscription?.organization_id ?? null;
         localSubscriptionId = localSubscription?.id ?? null;
@@ -410,38 +396,43 @@ export class CashfreeService {
       if (organizationId && providerPaymentId) {
         const amount = Number(payment.payment_amount ?? payment.amount ?? 0);
         const paymentStatus = String(payment.payment_status ?? payment.status ?? eventType);
-        await this.supabase.admin.from('payment_transactions').upsert({
-          organization_id: organizationId,
-          subscription_id: localSubscriptionId,
-          provider: 'CASHFREE',
-          provider_payment_id: providerPaymentId,
-          provider_order_id: null,
-          provider_subscription_id: providerSubscriptionId,
-          amount,
-          currency: payment.currency ?? 'INR',
-          status: paymentStatus,
-          method: payment.payment_method ?? payment.method ?? null,
-          captured_at: ['SUCCESS', 'PAID', 'CAPTURED'].includes(paymentStatus.toUpperCase()) ? new Date().toISOString() : null,
-          metadata: { webhook_event: eventType }
-        }, { onConflict: 'provider_payment_id' });
+        await this.database.execute(
+          `INSERT INTO payment_transactions(
+            id, organization_id, subscription_id, provider, provider_payment_id, provider_subscription_id,
+            amount, currency, status, method, captured_at, metadata
+          ) VALUES (?, ?, ?, 'CASHFREE', ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(provider, provider_payment_id) DO UPDATE SET
+            organization_id = excluded.organization_id, subscription_id = excluded.subscription_id,
+            provider_subscription_id = excluded.provider_subscription_id, amount = excluded.amount,
+            currency = excluded.currency, status = excluded.status, method = excluded.method,
+            captured_at = excluded.captured_at, metadata = excluded.metadata`,
+          [randomUUID(), organizationId, localSubscriptionId, providerPaymentId, providerSubscriptionId, amount,
+            payment.currency ?? 'INR', paymentStatus, payment.payment_method ?? payment.method ?? null,
+            ['SUCCESS', 'PAID', 'CAPTURED'].includes(paymentStatus.toUpperCase()) ? new Date().toISOString() : null,
+            JSON.stringify({ webhook_event: eventType })]
+        );
 
         if (localSubscriptionId && ['SUCCESS', 'PAID', 'CAPTURED'].includes(paymentStatus.toUpperCase())) {
-          await this.supabase.admin.from('subscriptions').update({ last_payment_at: new Date().toISOString() }).eq('id', localSubscriptionId);
+          await this.database.execute(
+            `UPDATE subscriptions SET last_payment_at = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?`,
+            [new Date().toISOString(), localSubscriptionId]
+          );
         }
       }
 
-      await this.supabase.admin.from('payment_webhook_events').update({
-        organization_id: organizationId,
-        processing_status: 'PROCESSED',
-        processed_at: new Date().toISOString()
-      }).eq('provider_event_id', eventId);
+      await this.database.execute(
+        `UPDATE payment_webhook_events SET organization_id = ?, processing_status = 'PROCESSED', processed_at = ?
+         WHERE provider = 'CASHFREE' AND provider_event_id = ?`,
+        [organizationId, new Date().toISOString(), eventId]
+      );
 
       return { duplicate: false, processed: true };
     } catch (error) {
-      await this.supabase.admin.from('payment_webhook_events').update({
-        processing_status: 'FAILED',
-        error_message: error instanceof Error ? error.message.slice(0, 500) : 'Webhook processing failed'
-      }).eq('provider_event_id', eventId);
+      await this.database.execute(
+        `UPDATE payment_webhook_events SET processing_status = 'FAILED', error_message = ?
+         WHERE provider = 'CASHFREE' AND provider_event_id = ?`,
+        [error instanceof Error ? error.message.slice(0, 500) : 'Webhook processing failed', eventId]
+      );
       throw error;
     }
   }
@@ -457,12 +448,12 @@ export class CashfreeService {
     const providerId = input.providerSubscription.subscription_id ?? input.providerSubscription.cf_subscription_id;
     if (!providerId) return { subscriptionId: null, status: null };
 
-    const { data: checkout } = await this.supabase.admin
-      .from('subscription_checkout_sessions')
-      .select('plan_id, billing_cycle')
-      .eq('provider', 'CASHFREE')
-      .eq('provider_subscription_id', providerId)
-      .maybeSingle();
+    const checkoutResult = await this.database.execute(
+      `SELECT plan_id, billing_cycle FROM subscription_checkout_sessions
+       WHERE provider = 'CASHFREE' AND provider_subscription_id = ? LIMIT 1`,
+      [providerId]
+    );
+    const checkout = checkoutResult.rows[0] as unknown as { plan_id:string|null; billing_cycle:string|null } | undefined;
 
     const planId = checkout?.plan_id ?? input.fallbackPlanId ?? null;
     const billingCycle = (checkout?.billing_cycle ?? input.billingCycle ?? null) as BillingCycle | null;
@@ -476,57 +467,35 @@ export class CashfreeService {
     const endsAt = input.providerSubscription.subscription_expiry_time ?? null;
     const nextChargeAt = input.providerSubscription.subscription_first_charge_time ?? null;
 
-    const { data: existing } = await this.supabase.admin
-      .from('subscriptions')
-      .select('id')
-      .eq('provider', 'CASHFREE')
-      .eq('provider_subscription_id', providerId)
-      .maybeSingle();
-
-    let subscriptionId: string | null = existing?.id ?? null;
-
-    if (existing?.id) {
-      const { error } = await this.supabase.admin.from('subscriptions').update({
-        status: mappedStatus,
-        provider: 'CASHFREE',
-        provider_status: providerStatus,
-        provider_customer_id: null,
-        starts_at: startsAt,
-        ends_at: endsAt,
-        next_charge_at: nextChargeAt,
-        billing_cycle: billingCycle
-      }).eq('id', existing.id);
-      if (error) throw new BadRequestException(error.message);
+    const existingResult = await this.database.execute(
+      `SELECT id FROM subscriptions WHERE provider = 'CASHFREE' AND provider_subscription_id = ? LIMIT 1`,
+      [providerId]
+    );
+    let subscriptionId = (existingResult.rows[0] as unknown as { id:string } | undefined)?.id ?? null;
+    if (subscriptionId) {
+      await this.database.execute(
+        `UPDATE subscriptions SET status = ?, provider_status = ?, starts_at = ?, ends_at = ?,
+          next_charge_at = ?, billing_cycle = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?`,
+        [mappedStatus, providerStatus, startsAt, endsAt, nextChargeAt, billingCycle, subscriptionId]
+      );
     } else if (planId) {
-      const { data: created, error } = await this.supabase.admin.from('subscriptions').insert({
-        organization_id: input.organizationId,
-        plan_id: planId,
-        status: mappedStatus,
-        starts_at: startsAt,
-        ends_at: endsAt,
-        provider: 'CASHFREE',
-        provider_subscription_id: providerId,
-        provider_status: providerStatus,
-        provider_customer_id: null,
-        billing_cycle: billingCycle,
-        next_charge_at: nextChargeAt,
-        admin_message: 'Brandspire POS subscription activated through Cashfree.'
-      }).select('id').single();
-
-      if (error) throw new BadRequestException(error.message);
-      subscriptionId = created.id;
+      subscriptionId = randomUUID();
+      await this.database.execute(
+        `INSERT INTO subscriptions(
+          id, organization_id, plan_id, status, starts_at, ends_at, provider, provider_subscription_id,
+          provider_status, billing_cycle, next_charge_at, admin_message
+        ) VALUES (?, ?, ?, ?, ?, ?, 'CASHFREE', ?, ?, ?, ?, 'Brandspire POS subscription activated through Cashfree.')`,
+        [subscriptionId, input.organizationId, planId, mappedStatus, startsAt, endsAt, providerId, providerStatus, billingCycle, nextChargeAt]
+      );
     }
 
     if (subscriptionId) {
-      await this.supabase.admin.from('subscription_events').insert({
-        organization_id: input.organizationId,
-        subscription_id: subscriptionId,
-        event_type: input.eventType,
-        provider: 'CASHFREE',
-        provider_event_id: input.providerEventId,
-        provider_subscription_id: providerId,
-        summary: { provider_status: providerStatus }
-      });
+      await this.database.execute(
+        `INSERT INTO subscription_events(id, organization_id, subscription_id, provider, event_type, provider_event_id, provider_subscription_id, details)
+         VALUES (?, ?, ?, 'CASHFREE', ?, ?, ?, ?)`,
+        [randomUUID(), input.organizationId, subscriptionId, input.eventType, input.providerEventId, providerId,
+          JSON.stringify({ provider_status: providerStatus })]
+      );
     }
 
     return { subscriptionId, status: mappedStatus };
@@ -545,7 +514,7 @@ function mapProviderStatus(status: string) {
   if (['active', 'authenticated', 'success'].includes(normalized)) return 'ACTIVE';
   if (['pending', 'created', 'initiated'].includes(normalized)) return 'PENDING_APPROVAL';
   if (['failed', 'failure', 'halted'].includes(normalized)) return 'PAST_DUE';
-  if (['paused'].includes(normalized)) return 'PAUSED';
+  if (['paused'].includes(normalized)) return 'GRACE_PERIOD';
   if (['cancelled', 'canceled'].includes(normalized)) return 'CANCELLED';
   if (['completed', 'expired'].includes(normalized)) return 'EXPIRED';
   return 'PENDING_APPROVAL';

@@ -1,25 +1,14 @@
-import { getSupabaseBrowserClient } from '@/lib/supabase';
+import { authenticatedApiRequest } from '@/lib/firebase';
 
 export async function adminRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const supabase = getSupabaseBrowserClient();
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
-  if (!token) throw new Error('ADMIN_SESSION_EXPIRED');
-
-  const base = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
-  const response = await fetch(`${base}/api/admin${path}`, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      ...(init?.headers ?? {})
+  try {
+    return await authenticatedApiRequest<T>(`/admin${path}`, init);
+  } catch (error) {
+    if (error instanceof Error && /token|session|unauthorized|access required/i.test(error.message)) {
+      throw new Error('ADMIN_SESSION_EXPIRED');
     }
-  });
-
-  const body = await response.json().catch(() => ({}));
-  if (response.status === 401) throw new Error('ADMIN_SESSION_EXPIRED');
-  if (!response.ok) throw new Error(body?.message ?? 'Brandspire Admin request failed');
-  return body as T;
+    throw error;
+  }
 }
 
 export function adminDate(value?: string | null) {

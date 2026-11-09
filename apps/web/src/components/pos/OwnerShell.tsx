@@ -3,7 +3,8 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import type { ReactNode } from 'react';
-import { getSupabaseBrowserClient } from '@/lib/supabase';
+import { getFirebaseAuth } from '@/lib/firebase';
+import { signOut } from 'firebase/auth';
 import { clearWorkspaceCache } from '@/lib/pos';
 import { posLanguageLabel, posText, type PosLanguage } from '@/lib/pos-i18n';
 import { phase8Text } from '@/lib/phase8-i18n';
@@ -62,7 +63,7 @@ export default function OwnerShell({ businessName, language = 'en', children }: 
 
   async function logout(){
     clearWorkspaceCache();
-    await getSupabaseBrowserClient().auth.signOut();
+    await signOut(getFirebaseAuth());
     router.push('/auth/login');
   }
 

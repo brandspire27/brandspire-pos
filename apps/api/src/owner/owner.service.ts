@@ -1,6 +1,8 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { SupabaseService } from '../common/supabase.service';
+import { FirebaseAdminService } from '../common/firebase-admin.service';
+import { TursoService } from '../database/turso.service';
 
 const createStaffSchema = z.object({
   fullName: z.string().trim().min(2).max(100),
@@ -8,168 +10,132 @@ const createStaffSchema = z.object({
   phone: z.string().trim().regex(/^[6-9]\d{9}$/).optional().or(z.literal('')),
   temporaryPassword: z.string().min(8).max(72)
 });
-
 const statusSchema = z.object({ active: z.boolean() });
 const passwordSchema = z.object({ temporaryPassword: z.string().min(8).max(72) });
 
 @Injectable()
 export class OwnerService {
-  constructor(private readonly supabase: SupabaseService) {}
+  constructor(private readonly database: TursoService, private readonly firebase: FirebaseAdminService) {}
+
+  async workspace(userId: string, organizationId: string) {
+    const result = await this.database.execute(
+      `SELECT o.id AS organizationId, o.name AS organizationName, m.role,
+        o.preferred_language AS preferredLanguage, s.status AS subscriptionStatus,
+        s.ends_at AS endsAt, s.admin_message AS adminMessage
+       FROM organizations o
+       JOIN organization_members m ON m.organization_id = o.id AND m.user_id = ? AND m.active = 1
+       LEFT JOIN subscriptions s ON s.id = (
+         SELECT id FROM subscriptions WHERE organization_id = o.id ORDER BY created_at DESC LIMIT 1
+       )
+       WHERE o.id = ? AND o.status != 'CLOSED' LIMIT 1`,
+      [userId, organizationId]
+    );
+    return (result.rows[0] as unknown as Record<string, unknown> | undefined) ?? null;
+  }
 
   async listStaff(organizationId: string) {
-    const { data: members, error } = await this.supabase.admin
-      .from('organization_members')
-      .select('user_id, active, created_at')
-      .eq('organization_id', organizationId)
-      .eq('role', 'STAFF')
-      .order('created_at', { ascending: false });
-
-    if (error) throw new BadRequestException(error.message);
-    const ids = (members ?? []).map((member) => member.user_id);
-    if (ids.length === 0) return [];
-
-    const { data: profiles, error: profileError } = await this.supabase.admin
-      .from('staff_profiles')
-      .select('user_id, full_name, email, phone, last_login_at')
-      .eq('organization_id', organizationId)
-      .in('user_id', ids);
-    if (profileError) throw new BadRequestException(profileError.message);
-
-    const profileMap = new Map((profiles ?? []).map((profile) => [profile.user_id, profile]));
-    return (members ?? []).map((member) => {
-      const profile = profileMap.get(member.user_id);
-      return {
-        userId: member.user_id,
-        email: profile?.email ?? '',
-        fullName: profile?.full_name ?? 'Staff Member',
-        phone: profile?.phone ?? '',
-        active: member.active,
-        createdAt: member.created_at,
-        lastLoginAt: profile?.last_login_at ?? null
-      };
-    });
+    const result = await this.database.execute(
+      `SELECT m.user_id AS userId, p.email, s.full_name AS fullName, s.phone,
+        m.active, m.created_at AS createdAt, s.last_login_at AS lastLoginAt
+       FROM organization_members m
+       JOIN staff_profiles s ON s.user_id = m.user_id AND s.organization_id = m.organization_id
+       JOIN user_profiles p ON p.firebase_uid = m.user_id
+       WHERE m.organization_id = ? AND m.role = 'STAFF'
+       ORDER BY m.created_at DESC`,
+      [organizationId]
+    );
+    return result.rows.map((row) => ({
+      ...(row as Record<string, unknown>),
+      active: Number((row as Record<string, unknown>).active) === 1
+    }));
   }
 
   async createStaff(organizationId: string, ownerUserId: string, input: unknown) {
     const parsed = createStaffSchema.safeParse(input);
     if (!parsed.success) throw new BadRequestException(parsed.error.issues[0]?.message ?? 'Invalid staff details');
     const values = parsed.data;
+    const email = values.email.toLowerCase();
+    let userId: string;
+    try {
+      const user = await this.firebase.auth().createUser({
+        email,
+        password: values.temporaryPassword,
+        displayName: values.fullName,
+        emailVerified: true
+      });
+      userId = user.uid;
+    } catch (error) {
+      const code = (error as { code?: string }).code;
+      if (code === 'auth/email-already-exists') throw new ConflictException('A user with this email already exists');
+      throw new BadRequestException('Could not create staff account');
+    }
 
-    const createResult = await this.supabase.admin.auth.admin.createUser({
-      email: values.email.toLowerCase(),
-      password: values.temporaryPassword,
-      email_confirm: true,
-      user_metadata: { account_type: 'STAFF', full_name: values.fullName }
-    });
-
-    if (createResult.error || !createResult.data.user) {
-      if (createResult.error?.message.toLowerCase().includes('already')) {
+    const transaction = await this.database.transaction(async (tx) => {
+      await tx.execute({
+        sql: `INSERT INTO user_profiles(firebase_uid, email, display_name) VALUES (?, ?, ?)`,
+        args: [userId, email, values.fullName]
+      });
+      await tx.execute({
+        sql: `INSERT INTO organization_members(id, organization_id, user_id, role, active)
+              VALUES (?, ?, ?, 'STAFF', 1)`,
+        args: [randomUUID(), organizationId, userId]
+      });
+      await tx.execute({
+        sql: `INSERT INTO staff_profiles(user_id, organization_id, full_name, email, phone, created_by)
+              VALUES (?, ?, ?, ?, ?, ?)`,
+        args: [userId, organizationId, values.fullName, email, values.phone || null, ownerUserId]
+      });
+      await tx.execute({
+        sql: `INSERT INTO audit_logs(id, organization_id, actor_user_id, actor_role, action, entity_type, entity_id, summary)
+              VALUES (?, ?, ?, 'OWNER', 'STAFF_CREATED', 'STAFF_USER', ?, ?)`,
+        args: [randomUUID(), organizationId, ownerUserId, userId, JSON.stringify({ email, full_name: values.fullName })]
+      });
+    }).catch(async (error) => {
+      await this.firebase.auth().deleteUser(userId).catch(() => undefined);
+      if ((error as { code?: string }).code === 'SQLITE_CONSTRAINT_UNIQUE') {
         throw new ConflictException('A user with this email already exists');
       }
-      throw new BadRequestException(createResult.error?.message ?? 'Could not create staff account');
-    }
-
-    const staffUserId = createResult.data.user.id;
-    const { error: memberError } = await this.supabase.admin.from('organization_members').insert({
-      organization_id: organizationId,
-      user_id: staffUserId,
-      role: 'STAFF',
-      active: true
+      throw new BadRequestException('Could not create staff account');
     });
-
-    if (memberError) {
-      await this.supabase.admin.auth.admin.deleteUser(staffUserId);
-      throw new BadRequestException(memberError.message);
-    }
-
-    const { error: profileError } = await this.supabase.admin.from('staff_profiles').insert({
-      user_id: staffUserId,
-      organization_id: organizationId,
-      full_name: values.fullName,
-      email: values.email.toLowerCase(),
-      phone: values.phone || null,
-      created_by: ownerUserId
-    });
-
-    if (profileError) {
-      await this.supabase.admin.from('organization_members').delete().eq('user_id', staffUserId).eq('organization_id', organizationId);
-      await this.supabase.admin.auth.admin.deleteUser(staffUserId);
-      throw new BadRequestException(profileError.message);
-    }
-
-    await this.supabase.admin.from('audit_logs').insert({
-      organization_id: organizationId,
-      actor_user_id: ownerUserId,
-      actor_role: 'OWNER',
-      action: 'STAFF_CREATED',
-      entity_type: 'STAFF_USER',
-      entity_id: staffUserId,
-      summary: { email: values.email.toLowerCase(), full_name: values.fullName }
-    });
-
-    return { userId: staffUserId, email: values.email.toLowerCase(), fullName: values.fullName, active: true };
+    void transaction;
+    return { userId, email, fullName: values.fullName, active: true };
   }
 
   async setStaffStatus(organizationId: string, ownerUserId: string, staffUserId: string, input: unknown) {
     const parsed = statusSchema.safeParse(input);
     if (!parsed.success) throw new BadRequestException('Invalid staff status');
-
-    const { data: member } = await this.supabase.admin
-      .from('organization_members')
-      .select('user_id')
-      .eq('organization_id', organizationId)
-      .eq('user_id', staffUserId)
-      .eq('role', 'STAFF')
-      .maybeSingle();
-    if (!member) throw new NotFoundException('Staff member not found');
-
-    const { error } = await this.supabase.admin
-      .from('organization_members')
-      .update({ active: parsed.data.active })
-      .eq('organization_id', organizationId)
-      .eq('user_id', staffUserId)
-      .eq('role', 'STAFF');
-    if (error) throw new BadRequestException(error.message);
-
-    await this.supabase.admin.from('audit_logs').insert({
-      organization_id: organizationId,
-      actor_user_id: ownerUserId,
-      actor_role: 'OWNER',
-      action: parsed.data.active ? 'STAFF_ACTIVATED' : 'STAFF_DEACTIVATED',
-      entity_type: 'STAFF_USER',
-      entity_id: staffUserId,
-      summary: {}
-    });
+    const updated = await this.database.execute(
+      `UPDATE organization_members SET active = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE organization_id = ? AND user_id = ? AND role = 'STAFF'`,
+      [parsed.data.active ? 1 : 0, organizationId, staffUserId]
+    );
+    if (updated.rowsAffected === 0) throw new NotFoundException('Staff member not found');
+    await this.database.execute(
+      `INSERT INTO audit_logs(id, organization_id, actor_user_id, actor_role, action, entity_type, entity_id, summary)
+       VALUES (?, ?, ?, 'OWNER', ?, 'STAFF_USER', ?, '{}')`,
+      [randomUUID(), organizationId, ownerUserId, parsed.data.active ? 'STAFF_ACTIVATED' : 'STAFF_DEACTIVATED', staffUserId]
+    );
     return { userId: staffUserId, active: parsed.data.active };
   }
 
   async resetStaffPassword(organizationId: string, ownerUserId: string, staffUserId: string, input: unknown) {
     const parsed = passwordSchema.safeParse(input);
     if (!parsed.success) throw new BadRequestException(parsed.error.issues[0]?.message ?? 'Invalid temporary password');
-
-    const { data: member } = await this.supabase.admin
-      .from('organization_members')
-      .select('user_id')
-      .eq('organization_id', organizationId)
-      .eq('user_id', staffUserId)
-      .eq('role', 'STAFF')
-      .maybeSingle();
-    if (!member) throw new NotFoundException('Staff member not found');
-
-    const { error } = await this.supabase.admin.auth.admin.updateUserById(staffUserId, {
-      password: parsed.data.temporaryPassword
-    });
-    if (error) throw new BadRequestException(error.message);
-
-    await this.supabase.admin.from('audit_logs').insert({
-      organization_id: organizationId,
-      actor_user_id: ownerUserId,
-      actor_role: 'OWNER',
-      action: 'STAFF_PASSWORD_RESET',
-      entity_type: 'STAFF_USER',
-      entity_id: staffUserId,
-      summary: {}
-    });
+    const member = await this.database.execute(
+      `SELECT 1 FROM organization_members WHERE organization_id = ? AND user_id = ? AND role = 'STAFF' LIMIT 1`,
+      [organizationId, staffUserId]
+    );
+    if (!member.rows.length) throw new NotFoundException('Staff member not found');
+    try {
+      await this.firebase.auth().updateUser(staffUserId, { password: parsed.data.temporaryPassword });
+    } catch {
+      throw new BadRequestException('Could not reset staff password');
+    }
+    await this.database.execute(
+      `INSERT INTO audit_logs(id, organization_id, actor_user_id, actor_role, action, entity_type, entity_id, summary)
+       VALUES (?, ?, ?, 'OWNER', 'STAFF_PASSWORD_RESET', 'STAFF_USER', ?, '{}')`,
+      [randomUUID(), organizationId, ownerUserId, staffUserId]
+    );
     return { reset: true };
   }
 }

@@ -6,7 +6,7 @@ import OwnerShell from '@/components/pos/OwnerShell';
 import WorkspaceLoader from '@/components/pos/WorkspaceLoader';
 import { formatINR, getCurrentOrganization, type CurrentOrganization } from '@/lib/pos';
 import { posText } from '@/lib/pos-i18n';
-import { getSupabaseBrowserClient } from '@/lib/supabase';
+import { getOwnerReport } from '@/lib/pos-api';
 
 type RangeKey='7'|'30'|'90';
 type ReportData={summary:{billCount:number;sales:number;collected:number;due:number;averageBill:number};paymentBreakdown:Array<{method:string;amount:number}>;topProducts:Array<{name:string;quantity:number;sales:number}>;dailySales:Array<{date:string;sales:number;bills:number}>;staffSales:Array<{name:string;sales:number;bills:number}>;lowStock:Array<{id:string;name:string;stock:number;threshold:number;unit:string}>};
@@ -17,7 +17,7 @@ const emptyGst:GstData={summary:{invoiceCount:0,grossSales:0,taxableSales:0,cgst
 export default function OwnerReportsPage(){
   const router=useRouter();const[org,setOrg]=useState<CurrentOrganization|null>(null);const[range,setRange]=useState<RangeKey>('30');const[data,setData]=useState<ReportData>(emptyReport);const[gst,setGst]=useState<GstData>(emptyGst);const[loading,setLoading]=useState(true);const[error,setError]=useState('');
   useEffect(()=>{getCurrentOrganization().then(current=>{if(!current)return router.replace('/auth/login');if(current.role!=='OWNER')return router.replace('/staff');setOrg(current);}).catch(err=>setError(err instanceof Error?err.message:'Could not load reports.'));},[router]);
-  useEffect(()=>{if(!org)return;async function load(){setLoading(true);setError('');const days=Number(range);const to=new Date();const from=new Date(to.getTime()-days*86400000);const supabase=getSupabaseBrowserClient();const[reportResult,gstResult]=await Promise.all([supabase.rpc('owner_report_summary',{p_organization_id:org!.organizationId,p_from:from.toISOString(),p_to:to.toISOString()}),supabase.rpc('owner_gst_report_summary',{p_organization_id:org!.organizationId,p_from:from.toISOString(),p_to:to.toISOString()})]);if(reportResult.error||gstResult.error)setError(reportResult.error?.message||gstResult.error?.message||'Could not load report.');else{setData((reportResult.data??emptyReport) as ReportData);setGst((gstResult.data??emptyGst) as GstData);}setLoading(false);}void load();},[org,range]);
+  useEffect(()=>{if(!org)return;async function load(){setLoading(true);setError('');const days=Number(range);const to=new Date();const from=new Date(to.getTime()-days*86400000);try{const[reportResult,gstResult]=await Promise.all([getOwnerReport(from.toISOString(),to.toISOString()),getOwnerReport(from.toISOString(),to.toISOString(),true)]);setData(reportResult.data as unknown as ReportData);setGst(gstResult.data as unknown as GstData);}catch(reason){setError(reason instanceof Error?reason.message:'Could not load report.');}finally{setLoading(false);}}void load();},[org,range]);
   const maxDaily=useMemo(()=>Math.max(1,...data.dailySales.map(d=>Number(d.sales))),[data.dailySales]);
   if(!org)return <WorkspaceLoader/>;const t=posText(org.preferredLanguage);
   return <OwnerShell businessName={org.organizationName} language={org.preferredLanguage}>

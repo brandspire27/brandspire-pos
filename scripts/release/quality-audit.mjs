@@ -8,7 +8,11 @@ const read=(rel)=>{try{return fs.readFileSync(path.join(root,rel),'utf8')}catch{
 const walk=(dir)=>{
   const base=path.join(root,dir);if(!fs.existsSync(base))return[];
   const files=[];for(const entry of fs.readdirSync(base,{withFileTypes:true})){
-    const full=path.join(base,entry.name);if(entry.isDirectory())files.push(...walk(path.relative(root,full)));else files.push(full);
+    const full=path.join(base,entry.name);
+    if(entry.isDirectory()){
+      if(['.next','build','dist','node_modules','.gradle'].includes(entry.name))continue;
+      files.push(...walk(path.relative(root,full)));
+    }else files.push(full);
   }return files;
 };
 const clientFiles=[...walk('apps/web'),...walk('apps/android')].filter(f=>/\.(ts|tsx|js|mjs|kt|kts|xml|properties|env|example)$/.test(f));
@@ -17,11 +21,15 @@ const clientText=clientFiles.map(f=>fs.readFileSync(f,'utf8')).join('\n');
 console.log('Brandspire POS — Phase 23 quality audit\n');
 
 const secretPatterns=[
-  ['Supabase service-role key name',/SUPABASE_SERVICE_ROLE_KEY\s*=\s*[^\s#]+/i],
+  ['Firebase service-account credentials',/FIREBASE_SERVICE_ACCOUNT_JSON\s*=\s*(?!$|YOUR_)[^\s#]+/i],
+  ['Turso auth token',/TURSO_AUTH_TOKEN\s*=\s*(?!$|YOUR_)[^\s#]+/i],
+  ['R2 secret access key',/R2_SECRET_ACCESS_KEY\s*=\s*(?!$|YOUR_)[^\s#]+/i],
   ['Cashfree secret value',/CASHFREE_CLIENT_SECRET\s*=\s*(?!YOUR_|$)[^\s#]+/i],
   ['Private OpenAI-style key',/\bsk-[A-Za-z0-9_-]{20,}\b/]
 ];
 for(const[label,re]of secretPatterns){re.test(clientText)?out('FAIL',`${label} appears in client-side files`):out('PASS',`${label} not exposed in client-side files`);}
+if(/supabase|@supabase/i.test(clientText))out('FAIL','Legacy Supabase runtime/config references remain in client-side files');
+else out('PASS','No legacy Supabase runtime/config references remain in client-side files');
 
 const apiMain=read('apps/api/src/main.ts');
 const security=read('apps/api/src/common/security/security.middleware.ts');

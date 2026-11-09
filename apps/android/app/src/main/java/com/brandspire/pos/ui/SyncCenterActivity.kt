@@ -156,7 +156,7 @@ class SyncCenterActivity : Activity() {
                     if (bill == null) db.markPrintDone(job.id)
                     else {
                         val result = ReceiptPrinter.print(this@SyncCenterActivity, bill, saved)
-                        if (result.success) db.markPrintDone(job.id) else db.markPrintFailed(job.id, result.message)
+                        if (result.success) db.markPrintDone(job.id) else db.markPrintFailed(job.id, result.message ?: "Print failed")
                     }
                 }
             }
@@ -170,8 +170,8 @@ class SyncCenterActivity : Activity() {
         val bill = db.localBill(clientId) ?: run { db.markPrintDone(jobId); refresh(); return }
         scope.launch {
             val result = withContext(Dispatchers.IO) { ReceiptPrinter.print(this@SyncCenterActivity, bill, saved) }
-            if (result.success) db.markPrintDone(jobId) else db.markPrintFailed(jobId, result.message)
-            Toast.makeText(this@SyncCenterActivity, if (result.success) tx("Receipt printed", "Receipt print ho gayi", "रसीद प्रिंट हो गई") else result.message, Toast.LENGTH_SHORT).show()
+            if (result.success) db.markPrintDone(jobId) else db.markPrintFailed(jobId, result.message ?: "Print failed")
+            Toast.makeText(this@SyncCenterActivity, if (result.success) tx("Receipt printed", "Receipt print ho gayi", "रसीद प्रिंट हो गई") else result.message ?: "Print failed", Toast.LENGTH_SHORT).show()
             refresh()
         }
     }

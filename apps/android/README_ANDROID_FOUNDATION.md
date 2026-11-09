@@ -29,14 +29,14 @@ Before production, test at least:
 
 Open `apps/android` as a project in Android Studio. If Android Studio asks to install Android SDK 35 / matching build tools, allow it.
 
-The next Android phase will connect:
+The Android app connects through Firebase Authentication and the Brandspire POS API:
 
-- Supabase Owner/Staff login
-- Brandspire POS API
+- Firebase Owner/Staff login
+- Firebase ID tokens on authenticated Brandspire POS API requests
 - Room/SQLite product + customer cache
 - WorkManager sync queue
 - bill creation with the same `client_invoice_id` idempotency used by the server
 - printer discovery UI and saved default printer
 - receipt rendering and asynchronous print jobs
 
-No production claim should be made until device and offline tests pass.
+Set `BRANDSPIRE_FIREBASE_API_KEY` and `BRANDSPIRE_API_BASE_URL` in `apps/android/gradle.properties` (see the staging and release examples). No production claim should be made until device and offline tests pass.

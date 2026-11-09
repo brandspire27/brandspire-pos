@@ -3,7 +3,8 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import type { ReactNode } from 'react';
-import { getSupabaseBrowserClient } from '@/lib/supabase';
+import { getFirebaseAuth } from '@/lib/firebase';
+import { signOut } from 'firebase/auth';
 import { clearWorkspaceCache } from '@/lib/pos';
 import { posText, type PosLanguage } from '@/lib/pos-i18n';
 import BrandspireAssist from '@/components/pos/BrandspireAssist';
@@ -29,7 +30,7 @@ export default function StaffShell({ businessName, language = 'en', children }: 
     ['/staff/products', t.products, 'product']
   ];
   const activeFor=(href:string)=>href==='/staff'?pathname===href:pathname.startsWith(href);
-  async function logout() { clearWorkspaceCache(); await getSupabaseBrowserClient().auth.signOut(); router.push('/auth/login'); }
+  async function logout() { clearWorkspaceCache(); await signOut(getFirebaseAuth()); router.push('/auth/login'); }
   return (
     <main className="staff-shell">
       <header className="staff-topbar no-print">

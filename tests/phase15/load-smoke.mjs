@@ -17,8 +17,7 @@ function loadEnv(file = process.argv[2] || path.join(process.cwd(), 'tests/phase
 }
 loadEnv();
 
-const supabase = (process.env.SUPABASE_URL || '').replace(/\/$/, '');
-const anon = process.env.SUPABASE_ANON_KEY || '';
+const firebaseApiKey = process.env.FIREBASE_API_KEY || process.env.NEXT_PUBLIC_FIREBASE_API_KEY || '';
 const apiBase = (process.env.API_BASE_URL || 'http://localhost:3001/api').replace(/\/$/, '');
 const email = process.env.OWNER_A_EMAIL || '';
 const password = process.env.OWNER_A_PASSWORD || '';
@@ -26,21 +25,23 @@ const requestCount = Math.max(10, Math.min(1000, Number(process.env.LOAD_REQUEST
 const concurrency = Math.max(1, Math.min(50, Number(process.env.LOAD_CONCURRENCY || 6)));
 const searchTerm = process.env.LOAD_SEARCH_TERM || '';
 
-if (!supabase || !anon || !email || !password) {
-  console.error('Missing SUPABASE_URL, SUPABASE_ANON_KEY, OWNER_A_EMAIL or OWNER_A_PASSWORD in tests/phase15/.env.phase15');
+if (!firebaseApiKey || !email || !password) {
+  console.error('Missing FIREBASE_API_KEY, OWNER_A_EMAIL or OWNER_A_PASSWORD in tests/phase15/.env.phase15');
   process.exit(2);
 }
 
 async function signIn() {
-  const r = await fetch(`${supabase}/auth/v1/token?grant_type=password`, {
-    method: 'POST', headers: { apikey: anon, 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password })
+  const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${encodeURIComponent(firebaseApiKey)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password, returnSecureToken: true })
   });
-  const body = await r.json();
-  if (!r.ok || !body.access_token) throw new Error(`Login failed: ${body.error_description || body.msg || r.status}`);
-  return body.access_token;
+  const body = await response.json();
+  if (!response.ok || !body.idToken) throw new Error(`Firebase login failed: ${body.error?.message || response.status}`);
+  return body.idToken;
 }
 const token = await signIn();
-const sbHeaders = { apikey: anon, Authorization: `Bearer ${token}` };
+const apiHeaders = { Authorization: `Bearer ${token}` };
 
 function percentile(sorted, p) {
   if (!sorted.length) return 0;
@@ -58,8 +59,8 @@ async function benchmark(name, makeRequest) {
       if (i >= requestCount) break;
       const t0 = performance.now();
       try {
-        const r = await makeRequest(i);
-        if (!r.ok) failures++;
+        const response = await makeRequest(i);
+        if (!response.ok) failures++;
       } catch {
         failures++;
       } finally {
@@ -86,21 +87,22 @@ async function benchmark(name, makeRequest) {
   return row;
 }
 
-console.log(`\nBrandspire POS — Phase 15 local/staging read-only load smoke (${requestCount} requests, concurrency ${concurrency})\n`);
+console.log(`\nBrandspire POS — Phase 15 API read-only load smoke (${requestCount} requests, concurrency ${concurrency})\n`);
+const q = encodeURIComponent(searchTerm);
 const rows = [];
-rows.push(await benchmark('API health', () => fetch(`${apiBase}/health`)));
-rows.push(await benchmark('API readiness', () => fetch(`${apiBase}/health/ready`)));
-rows.push(await benchmark('Workspace bootstrap', () => fetch(`${supabase}/rest/v1/rpc/get_current_workspace`, {
-  method: 'POST', headers: { ...sbHeaders, 'Content-Type': 'application/json' }, body: '{}'
-})));
-const q = encodeURIComponent(`*${searchTerm}*`);
-rows.push(await benchmark('Product search', () => fetch(`${supabase}/rest/v1/products?select=id,name,sku,barcode,selling_price,stock&active=eq.true&deleted_at=is.null&name=ilike.${q}&limit=20`, { headers: sbHeaders })));
-rows.push(await benchmark('Customer search', () => fetch(`${supabase}/rest/v1/customers?select=id,name,phone,outstanding_balance&active=eq.true&deleted_at=is.null&name=ilike.${q}&limit=20`, { headers: sbHeaders })));
-rows.push(await benchmark('Invoice listing', () => fetch(`${supabase}/rest/v1/invoices?select=id,invoice_number,status,grand_total,created_at&order=created_at.desc&limit=20`, { headers: sbHeaders })));
+rows.push(await benchmark('Workspace bootstrap', () => fetch(`${apiBase}/pos/workspace`, { headers: apiHeaders })));
+rows.push(await benchmark('Product search', () => fetch(`${apiBase}/pos/products?q=${q}&active=true&limit=20`, { headers: apiHeaders })));
+rows.push(await benchmark('Customer search', () => fetch(`${apiBase}/pos/customers?q=${q}&active=true&limit=20`, { headers: apiHeaders })));
+rows.push(await benchmark('Invoice listing', () => fetch(`${apiBase}/pos/invoices?limit=20`, { headers: apiHeaders })));
 
-const report = { generatedAt: new Date().toISOString(), mode: 'read-only-local-smoke', requestCount, concurrency, results: rows };
+const report = {
+  generatedAt: new Date().toISOString(),
+  target: apiBase,
+  requestsPerEndpoint: requestCount,
+  concurrency,
+  rows
+};
 fs.mkdirSync(path.join(process.cwd(), 'tests/phase15/results'), { recursive: true });
 const reportPath = path.join(process.cwd(), 'tests/phase15/results/load-latest.json');
 fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
 console.log(`\nReport: ${reportPath}`);
-console.log('Important: this local smoke test does NOT prove 10,000-tenant capacity. Production-scale claims require staged distributed load tests plus DB/CPU/memory/connection/queue monitoring.\n');

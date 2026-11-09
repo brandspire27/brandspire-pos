@@ -43,17 +43,23 @@ const web = parseEnv(webPath);
 const android = parseEnv(androidPath);
 
 console.log(`\nBrandspire POS release preflight (${production ? 'production' : 'local/staging'})\n`);
-present(api, 'SUPABASE_URL', 'API');
-present(api, 'SUPABASE_SERVICE_ROLE_KEY', 'API');
-present(web, 'NEXT_PUBLIC_SUPABASE_URL', 'Web');
-present(web, 'NEXT_PUBLIC_SUPABASE_ANON_KEY', 'Web');
+present(api, 'TURSO_DATABASE_URL', 'API');
+present(api, 'TURSO_AUTH_TOKEN', 'API');
+present(api, 'FIREBASE_PROJECT_ID', 'API');
+present(api, 'R2_ACCOUNT_ID', 'API');
+present(api, 'R2_BUCKET_NAME', 'API');
+present(api, 'R2_ACCESS_KEY_ID', 'API');
+present(api, 'R2_SECRET_ACCESS_KEY', 'API');
+present(web, 'NEXT_PUBLIC_FIREBASE_API_KEY', 'Web');
+present(web, 'NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN', 'Web');
+present(web, 'NEXT_PUBLIC_FIREBASE_PROJECT_ID', 'Web');
+present(web, 'NEXT_PUBLIC_FIREBASE_APP_ID', 'Web');
 present(web, 'NEXT_PUBLIC_API_URL', 'Web');
-present(android, 'BRANDSPIRE_SUPABASE_URL', 'Android');
-present(android, 'BRANDSPIRE_SUPABASE_ANON_KEY', 'Android');
+present(android, 'BRANDSPIRE_FIREBASE_API_KEY', 'Android');
 present(android, 'BRANDSPIRE_API_BASE_URL', 'Android');
 
 const combinedClient = `${fs.existsSync(webPath) ? fs.readFileSync(webPath, 'utf8') : ''}\n${fs.existsSync(androidPath) ? fs.readFileSync(androidPath, 'utf8') : ''}\n${Object.keys(process.env).filter((key) => /^(NEXT_PUBLIC_|BRANDSPIRE_)/.test(key)).map((key) => `${key}=${process.env[key]}`).join('\n')}`;
-if (/SUPABASE_SERVICE_ROLE_KEY\s*=|CASHFREE_CLIENT_SECRET\s*=|CASHFREE_WEBHOOK_SECRET\s*=/.test(combinedClient)) fail('A server secret appears in Web or Android configuration');
+if (/TURSO_AUTH_TOKEN\s*=|R2_SECRET_ACCESS_KEY\s*=|FIREBASE_SERVICE_ACCOUNT_JSON\s*=|CASHFREE_CLIENT_SECRET\s*=|CASHFREE_WEBHOOK_SECRET\s*=/.test(combinedClient)) fail('A server secret appears in Web or Android configuration');
 else pass('No backend service-role/Cashfree secrets found in client config');
 
 const cfId = envValue(api, 'CASHFREE_CLIENT_ID') || '';

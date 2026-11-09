@@ -22,7 +22,7 @@ import com.brandspire.pos.auth.SecureSessionStore
 import com.brandspire.pos.data.CachedCustomer
 import com.brandspire.pos.data.CachedProduct
 import com.brandspire.pos.data.OfflineDatabase
-import com.brandspire.pos.network.SupabaseHttpClient
+import com.brandspire.pos.network.BrandspireApiClient
 import com.brandspire.pos.network.BarcodeProductInfo
 import com.brandspire.pos.network.SmartBarcodeLookup
 import com.brandspire.pos.sync.SyncScheduler

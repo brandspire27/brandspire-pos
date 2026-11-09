@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { adminDate, adminMoney } from '@/lib/admin-api';
-import { getSupabaseBrowserClient } from '@/lib/supabase';
+import { authenticatedApiRequest } from '@/lib/firebase';
 
 type Overview = {
   configured: boolean;
@@ -17,16 +17,12 @@ type Overview = {
 };
 
 async function billingRequest<T>(path:string, init?:RequestInit):Promise<T> {
-  const supabase = getSupabaseBrowserClient();
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
-  if (!token) throw new Error('ADMIN_SESSION_EXPIRED');
-  const base = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
-  const response = await fetch(`${base}/api/admin/billing${path}`, { ...init, headers: { 'Content-Type':'application/json', Authorization:`Bearer ${token}`, ...(init?.headers ?? {}) } });
-  const body = await response.json().catch(() => ({}));
-  if (response.status === 401) throw new Error('ADMIN_SESSION_EXPIRED');
-  if (!response.ok) throw new Error(body?.message ?? 'Cashfree billing request failed');
-  return body as T;
+  try {
+    return await authenticatedApiRequest<T>(`/admin/billing${path}`, init);
+  } catch (error) {
+    if (error instanceof Error && /token|session|unauthorized|access required/i.test(error.message)) throw new Error('ADMIN_SESSION_EXPIRED');
+    throw error;
+  }
 }
 
 export default function AdminBillingPage() {

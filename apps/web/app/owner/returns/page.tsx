@@ -6,11 +6,10 @@ import OwnerShell from '@/components/pos/OwnerShell';
 import WorkspaceLoader from '@/components/pos/WorkspaceLoader';
 import { formatDateTime, formatINR, getCurrentOrganization, type CurrentOrganization } from '@/lib/pos';
 import { phase8Text } from '@/lib/phase8-i18n';
-import { getSupabaseBrowserClient } from '@/lib/supabase';
+import { issueCreditNote, listReturnInvoices, listReturnItems } from '@/lib/pos-api';
 
 type Invoice = { id:string; invoice_number:string; grand_total:number; credited_amount:number; created_at:string; customer_id:string|null; customers:{name:string}|null };
 type Item = { id:string; product_name_snapshot:string; quantity:number; line_total:number; product_id:string|null };
-type Returned = { invoice_item_id:string; quantity:number };
 type RefundMethod='CASH'|'UPI'|'CARD'|'OTHER';
 
 export default function ReturnsPage(){
@@ -28,8 +27,9 @@ export default function ReturnsPage(){
   const [success,setSuccess]=useState('');
 
   const loadInvoices=useCallback(async(current:CurrentOrganization)=>{
-    const {data,error:invoiceError}=await getSupabaseBrowserClient().from('invoices').select('id,invoice_number,grand_total,credited_amount,created_at,customer_id,customers(name)').eq('organization_id',current.organizationId).eq('payment_status','PAID').eq('amount_due',0).not('status','in','(CANCELLED,REFUNDED)').order('created_at',{ascending:false}).limit(100);
-    if(invoiceError)setError(invoiceError.message);else setInvoices((data??[]) as unknown as Invoice[]);
+    void current;
+    try { const {data}=await listReturnInvoices();setInvoices((data as unknown as Array<Record<string,unknown>>).map(row=>({...row,customers:row.customer_name?{name:String(row.customer_name)}:null})) as unknown as Invoice[]); }
+    catch(reason){setError(reason instanceof Error?reason.message:'Could not load invoices.');}
   },[]);
 
   useEffect(()=>{getCurrentOrganization().then(async current=>{
@@ -38,23 +38,24 @@ export default function ReturnsPage(){
 
   useEffect(()=>{if(!org||!selectedId){setItems([]);setReturned({});setQty({});return;}void (async()=>{
     setError('');setSuccess('');
-    const supabase=getSupabaseBrowserClient();
-    const [{data:itemData,error:itemError},{data:returnData,error:returnError}]=await Promise.all([
-      supabase.from('invoice_items').select('id,product_name_snapshot,quantity,line_total,product_id').eq('organization_id',org.organizationId).eq('invoice_id',selectedId).order('created_at'),
-      supabase.from('credit_note_items').select('invoice_item_id,quantity,credit_notes!inner(invoice_id,status)').eq('organization_id',org.organizationId).eq('credit_notes.invoice_id',selectedId).eq('credit_notes.status','ISSUED')
-    ]);
-    if(itemError)return setError(itemError.message);if(returnError)return setError(returnError.message);
-    const map:Record<string,number>={};for(const row of (returnData??[]) as unknown as Returned[])map[row.invoice_item_id]=(map[row.invoice_item_id]??0)+Number(row.quantity||0);
-    setReturned(map);setItems((itemData??[]) as Item[]);setQty({});
+    try {
+      const {data}=await listReturnItems(selectedId);
+      const rows=data as unknown as Array<Item&{returned_quantity:number}>;
+      const map:Record<string,number>={};for(const row of rows)map[row.id]=Number(row.returned_quantity||0);
+      setReturned(map);setItems(rows);setQty({});
+    } catch(reason) {setError(reason instanceof Error?reason.message:'Could not load returnable items.');}
   })();},[org,selectedId]);
 
   const selected=useMemo(()=>invoices.find(i=>i.id===selectedId)??null,[invoices,selectedId]);
   const estimate=useMemo(()=>items.reduce((sum,item)=>{const q=Math.max(0,Number(qty[item.id]||0));return sum+(q>0?(Number(item.line_total)/Number(item.quantity))*q:0);},0),[items,qty]);
   const t=phase8Text(org?.preferredLanguage??'en');
 
-  async function issue(event:FormEvent){event.preventDefault();if(!org||!selected)return;const chosen=items.map(item=>({invoice_item_id:item.id,quantity:Number(qty[item.id]||0)})).filter(x=>x.quantity>0);if(chosen.length===0)return setError(t.selectReturnItem);if(reason.trim().length<3)return setError(t.reasonHint);setSaving(true);setError('');setSuccess('');
-    const {data,error:rpcError}=await getSupabaseBrowserClient().rpc('issue_invoice_credit_note',{p_organization_id:org.organizationId,p_invoice_id:selected.id,p_reason:reason.trim(),p_refund_method:method,p_items:chosen});
-    setSaving(false);if(rpcError)return setError(rpcError.message);const result=Array.isArray(data)?data[0]:data;setSuccess(`${t.creditNoteIssued} ${result?.credit_note_number??''} · ${formatINR(result?.total_amount??estimate)}`);setSelectedId('');setItems([]);setQty({});setReason('');await loadInvoices(org);
+  async function issue(event:FormEvent){event.preventDefault();if(!org||!selected)return;const chosen=items.map(item=>({invoice_item_id:item.id,quantity:Number(qty[item.id]||0)})).filter(x=>x.quantity>0);if(chosen.length===0)return setError(t.selectReturnItem);if(reason.trim().length<3)return setError(t.reasonHint);  setSaving(true);setError('');setSuccess('');
+    try {
+      const {data:result}=await issueCreditNote(selected.id,{reason:reason.trim(),refundMethod:method,items:chosen});
+      setSuccess(`${t.creditNoteIssued} ${result.credit_note_number} · ${formatINR(result.total_amount)}`);setSelectedId('');setItems([]);setQty({});setReason('');await loadInvoices(org);
+    } catch(reason){setError(reason instanceof Error?reason.message:'Could not issue credit note.');}
+    finally{setSaving(false);}
   }
 
   if(!org)return <WorkspaceLoader/>;

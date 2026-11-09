@@ -13,7 +13,7 @@ import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import com.brandspire.pos.auth.SecureSessionStore
-import com.brandspire.pos.network.SupabaseHttpClient
+import com.brandspire.pos.network.BrandspireApiClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -25,7 +25,7 @@ class LoginActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         bsApplyWindowChrome()
-        val api = SupabaseHttpClient()
+        val api = BrandspireApiClient()
 
         val scroll = ScrollView(this).apply {
             isFillViewport = true
@@ -91,7 +91,7 @@ class LoginActivity : Activity() {
         }
 
         if (!api.isConfigured()) {
-            showError("Android Supabase configuration is missing.")
+            showError("Firebase or Brandspire API configuration is missing.")
         }
 
         button.setOnClickListener {

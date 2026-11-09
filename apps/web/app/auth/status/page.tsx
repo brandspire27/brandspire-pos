@@ -3,7 +3,8 @@
 import Link from 'next/link';
 import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { getSupabaseBrowserClient } from '@/lib/supabase';
+import { onAuthStateChanged } from 'firebase/auth';
+import { authenticatedApiRequest, getFirebaseAuth } from '@/lib/firebase';
 
 type Application = {
   business_name: string;
@@ -20,26 +21,21 @@ function ApplicationStatusPageContent() {
   const [notLoggedIn, setNotLoggedIn] = useState(false);
 
   useEffect(() => {
-    async function load() {
-      const supabase = getSupabaseBrowserClient();
-      const { data: userData } = await supabase.auth.getUser();
-
-      if (!userData.user) {
+    return onAuthStateChanged(getFirebaseAuth(), async (user) => {
+      if (!user) {
         setNotLoggedIn(true);
         setLoading(false);
         return;
       }
-
-      const { data } = await supabase
-        .from('owner_applications')
-        .select('business_name, owner_name, status, admin_note, created_at')
-        .maybeSingle();
-
-      setApplication((data as Application | null) ?? null);
-      setLoading(false);
-    }
-
-    load();
+      try {
+        const response = await authenticatedApiRequest<{ success: true; data: Application | null }>('/auth/owner-application');
+        setApplication(response.data);
+      } catch {
+        setApplication(null);
+      } finally {
+        setLoading(false);
+      }
+    });
   }, []);
 
   const verify = searchParams.get('verify') === '1';

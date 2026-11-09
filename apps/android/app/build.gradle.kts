@@ -5,8 +5,7 @@ plugins {
 
 fun quoted(value: String): String = "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
 
-val supabaseUrl = providers.gradleProperty("BRANDSPIRE_SUPABASE_URL").orElse("").get()
-val supabaseAnonKey = providers.gradleProperty("BRANDSPIRE_SUPABASE_ANON_KEY").orElse("").get()
+val firebaseApiKey = providers.gradleProperty("BRANDSPIRE_FIREBASE_API_KEY").orElse("").get()
 val apiBaseUrl = providers.gradleProperty("BRANDSPIRE_API_BASE_URL").orElse("http://10.0.2.2:3001").get()
 
 android {
@@ -20,8 +19,7 @@ android {
         versionCode = 4
         versionName = "0.4.0"
 
-        buildConfigField("String", "SUPABASE_URL", quoted(supabaseUrl.trimEnd('/')))
-        buildConfigField("String", "SUPABASE_ANON_KEY", quoted(supabaseAnonKey))
+        buildConfigField("String", "FIREBASE_API_KEY", quoted(firebaseApiKey))
         buildConfigField("String", "API_BASE_URL", quoted(apiBaseUrl.trimEnd('/')))
     }
 

@@ -7,7 +7,7 @@ This phase is intentionally not a visual feature phase. It strengthens the found
 
 - API liveness endpoint: `GET /api/health`
 - API + database readiness endpoint: `GET /api/health/ready`
-- Concurrency-safe offline invoice idempotency using a transaction-scoped PostgreSQL advisory lock keyed by organization + `client_invoice_id`
+- Concurrency-safe offline invoice idempotency keyed by organization + `client_invoice_id`
 - Additional tenant-scoped product/customer lookup indexes
 - Automated security/RLS test runner
 - Automated invoice-idempotency and concurrent invoice-number test (opt-in, mutating)
@@ -20,7 +20,7 @@ This phase is intentionally not a visual feature phase. It strengthens the found
 2. Copy everything inside it into the existing `C:\BApos\brandspire-pos-starter` folder.
 3. Choose **Replace** for matching files.
 4. No npm package is added.
-5. Run `supabase/migrations/0010_security_reliability_hardening.sql` in Supabase SQL Editor.
+5. Configure Firebase, Turso, R2, and API environment values from the current deployment checklist. Apply API migrations with `pnpm --filter @brandspire/api db:migrate`.
 6. Restart Brandspire POS:
 
 ```powershell
@@ -53,8 +53,8 @@ Fill the development/test Owner and Staff credentials. Never commit this file.
 
 The minimum read-only security checks require:
 
-- `SUPABASE_URL`
-- `SUPABASE_ANON_KEY`
+- `FIREBASE_API_KEY`
+- `API_BASE_URL`
 - `OWNER_A_EMAIL`
 - `OWNER_A_PASSWORD`
 - `STAFF_EMAIL`
@@ -104,8 +104,6 @@ node .\tests\phase15\load-smoke.mjs
 
 It measures:
 
-- API health
-- API readiness
 - workspace bootstrap
 - product search
 - customer search

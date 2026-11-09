@@ -6,9 +6,9 @@ import OwnerShell from '@/components/pos/OwnerShell';
 import StaffShell from '@/components/pos/StaffShell';
 import WorkspaceLoader from '@/components/pos/WorkspaceLoader';
 import { formatDateTime, formatINR, getCurrentOrganization, type CurrentOrganization } from '@/lib/pos';
-import { getSupabaseBrowserClient } from '@/lib/supabase';
 import { downloadA4InvoicePdf, shareA4InvoicePdf } from '@/lib/invoice-pdf';
 import { localizedStatus, posText } from '@/lib/pos-i18n';
+import { cancelInvoice as cancelInvoiceRequest, getInvoiceDetail } from '@/lib/pos-api';
 
 type PrintFormat = 'THERMAL_58MM' | 'THERMAL_80MM' | 'A4';
 type Customer = { name:string; phone:string|null; email:string|null; address:string|null; state:string|null; gstin:string|null } | null;
@@ -48,29 +48,20 @@ export default function InvoiceDetailView({ invoiceId, portal }:Props){
       const expected=portal==='owner'?'OWNER':'STAFF';
       if(current.role!==expected){router.replace(current.role==='OWNER'?`/owner/invoices/${invoiceId}`:`/staff/invoices/${invoiceId}`);return;}
       setOrg(current);
-      const supabase=getSupabaseBrowserClient();
-      const [invoiceResult,itemResult,paymentResult,businessResult,settingsResult]=await Promise.all([
-        supabase.from('invoices').select('id,invoice_number,status,payment_status,payment_method,subtotal,discount_amount,taxable_amount,cgst,sgst,igst,grand_total,amount_paid,amount_due,created_at,cancellation_reason,cancelled_at,customers(name,phone,email,address,state,gstin)').eq('id',invoiceId).eq('organization_id',current.organizationId).single(),
-        supabase.from('invoice_items').select('id,product_name_snapshot,hsn_sac_snapshot,unit_snapshot,quantity,unit_price,tax_rate,taxable_amount,cgst,sgst,igst,line_total').eq('invoice_id',invoiceId).eq('organization_id',current.organizationId).order('created_at'),
-        supabase.from('payments').select('id,amount,method,status,note,created_at').eq('invoice_id',invoiceId).eq('organization_id',current.organizationId).order('created_at',{ascending:false}),
-        supabase.from('organizations').select('name,phone,email,address,state,gstin').eq('id',current.organizationId).single(),
-        supabase.from('organization_settings').select('default_print_format,receipt_header,receipt_footer,invoice_footer,show_gstin_on_receipt').eq('organization_id',current.organizationId).maybeSingle()
-      ]);
-      if(invoiceResult.error)throw invoiceResult.error;
-      if(itemResult.error)throw itemResult.error;
-      if(paymentResult.error)throw paymentResult.error;
-      if(businessResult.error)throw businessResult.error;
-      setInvoice(invoiceResult.data as unknown as Invoice);
-      setItems((itemResult.data??[]) as Item[]);
-      setPayments((paymentResult.data??[]) as Payment[]);
-      setBusiness(businessResult.data as Business);
-      const preferred=settingsResult.data?.default_print_format as PrintFormat|undefined;
+      const response=await getInvoiceDetail(invoiceId);
+      const {invoice:row,items:invoiceItems,payments:invoicePayments,organization:businessRow,settings:settingsRow}=response.data;
+      const customer={name:row.customer_name as string|null,phone:row.customer_phone as string|null,email:row.customer_email as string|null,address:row.customer_address as string|null,state:row.customer_state as string|null,gstin:row.customer_gstin as string|null};
+      setInvoice({...row,customers:row.customer_id?customer:null} as unknown as Invoice);
+      setItems(invoiceItems as unknown as Item[]);
+      setPayments(invoicePayments as unknown as Payment[]);
+      setBusiness(businessRow as unknown as Business);
+      const preferred=settingsRow.default_print_format as PrintFormat|undefined;
       if(preferred)setFormat(preferred);
       setPrintSettings({
-        receiptHeader:settingsResult.data?.receipt_header??'',
-        receiptFooter:settingsResult.data?.receipt_footer??'Thank you for your business',
-        invoiceFooter:settingsResult.data?.invoice_footer??'Thank you for your business',
-        showGstin:settingsResult.data?.show_gstin_on_receipt??true
+        receiptHeader:String(settingsRow.receipt_header??''),
+        receiptFooter:String(settingsRow.receipt_footer??'Thank you for your business'),
+        invoiceFooter:String(settingsRow.invoice_footer??'Thank you for your business'),
+        showGstin:Number(settingsRow.show_gstin_on_receipt??1)===1
       });
     }catch(err){setError(err instanceof Error?err.message:'Could not load invoice.');}
     finally{setLoading(false);}
@@ -113,14 +104,15 @@ export default function InvoiceDetailView({ invoiceId, portal }:Props){
   async function cancelInvoice(){
     if(!canCancel||cancelReason.trim().length<3)return;
     setCancelling(true);setError('');
-    const {error:cancelError}=await getSupabaseBrowserClient().rpc('cancel_pos_invoice',{
-      p_organization_id:org!.organizationId,
-      p_invoice_id:invoiceId,
-      p_reason:cancelReason.trim()
-    });
-    if(cancelError){setError(cancelError.message);setCancelling(false);return;}
-    setCancelMode(false);setCancelReason('');setCancelling(false);
-    await load();
+    try {
+      await cancelInvoiceRequest(invoiceId,cancelReason.trim());
+      setCancelMode(false);setCancelReason('');
+      await load();
+    } catch(reason) {
+      setError(reason instanceof Error?reason.message:'Could not cancel invoice.');
+    } finally {
+      setCancelling(false);
+    }
   }
 
   return <>

@@ -16,7 +16,7 @@ import com.brandspire.pos.auth.SecureSessionStore
 import com.brandspire.pos.auth.Workspace
 import com.brandspire.pos.auth.WorkspaceCache
 import com.brandspire.pos.data.OfflineDatabase
-import com.brandspire.pos.network.SupabaseHttpClient
+import com.brandspire.pos.network.BrandspireApiClient
 import com.brandspire.pos.network.PlatformApiClient
 import com.brandspire.pos.sync.SyncScheduler
 import com.brandspire.pos.sync.isOnline
@@ -82,7 +82,7 @@ class HomeActivity : Activity() {
         }
 
         scope.launch {
-            val api = SupabaseHttpClient()
+            val api = BrandspireApiClient()
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     if (session!!.expiresAtEpochSeconds <= Instant.now().epochSecond + 60) {
@@ -319,7 +319,7 @@ class HomeActivity : Activity() {
             val db = OfflineDatabase(this@HomeActivity)
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    val api = SupabaseHttpClient()
+                    val api = BrandspireApiClient()
                     db.cacheProducts(workspace.organizationId, api.fetchProducts(accessToken, workspace.organizationId))
                     db.cacheCustomers(workspace.organizationId, api.fetchCustomers(accessToken, workspace.organizationId))
                 }

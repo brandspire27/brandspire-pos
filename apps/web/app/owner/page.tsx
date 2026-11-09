@@ -8,7 +8,7 @@ import SubscriptionBanner from '@/components/pos/SubscriptionBanner';
 import WorkspaceLoader from '@/components/pos/WorkspaceLoader';
 import { formatINR, getCurrentOrganization, isSubscriptionUsable, type CurrentOrganization } from '@/lib/pos';
 import { localizedStatus, posText } from '@/lib/pos-i18n';
-import { getSupabaseBrowserClient } from '@/lib/supabase';
+import { getOwnerDashboard } from '@/lib/pos-api';
 
 type DashboardData = {
   todaySales: number;
@@ -33,27 +33,10 @@ export default function OwnerDashboard() {
         if (current.role !== 'OWNER') { router.replace('/staff'); return; }
         setOrg(current);
 
-        const supabase = getSupabaseBrowserClient();
         const start = new Date();
         start.setHours(0, 0, 0, 0);
-
-        const [invoiceResult, lowStockResult, outstandingResult, recentResult] = await Promise.all([
-          supabase.from('invoices').select('grand_total').eq('organization_id', current.organizationId).gte('created_at', start.toISOString()).neq('status', 'CANCELLED'),
-          supabase.from('products').select('stock, low_stock_threshold').eq('organization_id', current.organizationId).is('deleted_at', null).eq('active', true),
-          supabase.from('customers').select('outstanding_balance').eq('organization_id', current.organizationId).is('deleted_at', null),
-          supabase.from('invoices').select('id, invoice_number, grand_total, payment_status, created_at').eq('organization_id', current.organizationId).order('created_at', { ascending: false }).limit(5)
-        ]);
-
-        const invoicesToday = (invoiceResult.data ?? []) as Array<{ grand_total?: number | string | null }>;
-        const customerBalances = (outstandingResult.data ?? []) as Array<{ outstanding_balance?: number | string | null }>;
-        const productsLowStock = (lowStockResult.data ?? []) as Array<{ stock?: number | string | null; low_stock_threshold?: number | string | null }>;
-        setData({
-          todaySales: invoicesToday.reduce<number>((sum, invoice) => sum + Number(invoice.grand_total ?? 0), 0),
-          todayBills: invoicesToday.length,
-          lowStock: productsLowStock.filter((product) => Number(product.stock ?? 0) <= Number(product.low_stock_threshold ?? 0)).length,
-          outstanding: customerBalances.reduce<number>((sum, customer) => sum + Number(customer.outstanding_balance ?? 0), 0),
-          recentInvoices: (recentResult.data ?? []) as DashboardData['recentInvoices']
-        });
+        const response = await getOwnerDashboard(start.toISOString());
+        setData(response.data);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Could not load dashboard.');
       } finally { setLoading(false); }

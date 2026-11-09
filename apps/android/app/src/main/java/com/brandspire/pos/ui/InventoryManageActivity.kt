@@ -10,7 +10,7 @@ import android.widget.TextView
 import android.widget.Toast
 import com.brandspire.pos.auth.SecureSessionStore
 import com.brandspire.pos.data.OfflineDatabase
-import com.brandspire.pos.network.SupabaseHttpClient
+import com.brandspire.pos.network.BrandspireApiClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -37,7 +37,7 @@ class InventoryManageActivity : Activity() {
         val session = SecureSessionStore(this).read() ?: return finish()
         scope.launch {
             val result = withContext(Dispatchers.IO) { runCatching {
-                val api = SupabaseHttpClient()
+                val api = BrandspireApiClient()
                 val rows = api.fetchProducts(session.accessToken, organizationId)
                 OfflineDatabase(this@InventoryManageActivity).cacheProducts(organizationId, rows)
             } }
@@ -76,7 +76,7 @@ class InventoryManageActivity : Activity() {
         val session = SecureSessionStore(this).read() ?: return finish()
         scope.launch {
             val result = withContext(Dispatchers.IO) { runCatching {
-                val api = SupabaseHttpClient()
+                val api = BrandspireApiClient()
                 api.adjustProductStock(session.accessToken, organizationId, productId, if (positive) amount else -amount, noteField.text.toString())
                 OfflineDatabase(this@InventoryManageActivity).cacheProducts(organizationId, api.fetchProducts(session.accessToken, organizationId))
             } }

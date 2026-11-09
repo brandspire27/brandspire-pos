@@ -15,6 +15,11 @@ export class OwnerController {
     return { success: true, owner: { userId: request.ownerUserId, organizationId: request.organizationId, email: request.ownerEmail } };
   }
 
+  @Get('workspace')
+  async workspace(@Req() request: OwnerRequest) {
+    return { success: true, data: await this.ownerService.workspace(request.ownerUserId!, request.organizationId!) };
+  }
+
   @Get('staff')
   async staff(@Req() request: OwnerRequest) {
     return { success: true, data: await this.ownerService.listStaff(request.organizationId!) };

@@ -10,7 +10,7 @@ import android.widget.Toast
 import com.brandspire.pos.auth.SecureSessionStore
 import com.brandspire.pos.data.CachedCustomer
 import com.brandspire.pos.data.OfflineDatabase
-import com.brandspire.pos.network.SupabaseHttpClient
+import com.brandspire.pos.network.BrandspireApiClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -50,7 +50,7 @@ class CustomerLedgerActivity : Activity() {
     private fun loadLedger(customer: CachedCustomer) {
         val session=SecureSessionStore(this).read() ?: return finish()
         scope.launch {
-            val result=withContext(Dispatchers.IO){ runCatching { SupabaseHttpClient().customerLedger(session.accessToken, organizationId, customer.id) } }
+            val result=withContext(Dispatchers.IO){ runCatching { BrandspireApiClient().customerLedger(session.accessToken, organizationId, customer.id) } }
             result.onSuccess { showLedger(customer, it) }.onFailure { Toast.makeText(this@CustomerLedgerActivity,it.message ?: "Ledger failed",Toast.LENGTH_LONG).show() }
         }
     }

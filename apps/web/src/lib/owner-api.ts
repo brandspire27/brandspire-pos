@@ -1,27 +1,7 @@
-import { getSupabaseBrowserClient } from '@/lib/supabase';
+import { authenticatedApiRequest } from '@/lib/firebase';
 
 async function ownerRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const supabase = getSupabaseBrowserClient();
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
-  if (!token) throw new Error('Your session has expired. Please log in again.');
-
-  const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
-  const response = await fetch(`${apiBase}/api/owner${path}`, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      ...(init?.headers ?? {})
-    }
-  });
-
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const message = body?.message ?? body?.error?.message ?? 'Brandspire POS request failed';
-    throw new Error(Array.isArray(message) ? message[0] : message);
-  }
-  return body as T;
+  return authenticatedApiRequest<T>(`/owner${path}`, init);
 }
 
 export type StaffRecord = {

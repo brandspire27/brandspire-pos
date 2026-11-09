@@ -3,9 +3,10 @@ FROM node:24-alpine AS build
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@11.24.0 --activate
 
-COPY package.json pnpm-workspace.yaml turbo.json ./
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml turbo.json ./
 COPY apps/api/package.json apps/api/package.json
-RUN pnpm install --filter @brandspire/api... --no-frozen-lockfile
+COPY apps/web/package.json apps/web/package.json
+RUN pnpm install --filter @brandspire/api... --frozen-lockfile
 
 COPY apps/api apps/api
 RUN pnpm --filter @brandspire/api build
@@ -21,6 +22,9 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/api/package.json ./apps/api/package.json
 COPY --from=build /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=build /app/apps/api/dist ./apps/api/dist
+COPY --from=build /app/apps/api/scripts ./apps/api/scripts
+COPY --from=build /app/apps/api/migrations ./apps/api/migrations
 
 EXPOSE 3001
-CMD ["pnpm", "--filter", "@brandspire/api", "start"]
+WORKDIR /app/apps/api
+CMD ["node", "dist/main.js"]

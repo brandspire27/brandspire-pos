@@ -4,17 +4,21 @@
   "scripts": {
     "dev": "nest start --watch",
     "build": "nest build",
+    "db:migrate": "node scripts/db-migrate.mjs",
     "start": "node dist/main.js",
     "lint": "echo \"api lint pending\"",
-    "test": "jest"
+    "test": "jest --passWithNoTests && node scripts/db-migrate-smoke.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "latest",
+    "@aws-sdk/s3-request-presigner": "latest",
+    "@libsql/client": "latest",
     "@nestjs/common": "latest",
     "@nestjs/core": "latest",
     "@nestjs/platform-express": "latest",
-    "@supabase/supabase-js": "latest",
     "dotenv": "latest",
     "express": "^5.2.1",
+    "firebase-admin": "latest",
     "reflect-metadata": "latest",
     "rxjs": "latest",
     "zod": "latest"

@@ -1,6 +1,6 @@
 # Brandspire POS Phase 6 Security / Business Tests
 
-Run these against a development or staging Supabase project.
+Run these against a development or staging API connected to a test Turso database.
 
 1. **Owner can collect a partial payment**
    - Create a CREDIT invoice with due amount.
@@ -12,7 +12,7 @@ Run these against a development or staging Supabase project.
    - Expect invoice `PAID`, `amount_due = 0`, customer outstanding reduced.
 
 3. **Staff cannot collect later payments**
-   - Call `collect_invoice_payment` as Staff.
+   - Call `POST /api/pos/invoices/:id/payments` as Staff.
    - Expect `Owner access required`.
 
 4. **Overpayment is rejected**
@@ -26,7 +26,7 @@ Run these against a development or staging Supabase project.
    - Expect invoice `CANCELLED`, due removed, product stock restored, `RETURN` inventory movement created, audit log created.
 
 6. **Staff cannot cancel invoices**
-   - Call `cancel_pos_invoice` as Staff.
+   - Call `POST /api/pos/invoices/:id/cancel` as Staff.
    - Expect `Owner access required`.
 
 7. **Paid / partially-paid invoice cancellation is rejected**

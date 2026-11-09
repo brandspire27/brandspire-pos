@@ -1,7 +1,5 @@
-# Copy these three lines into apps/android/gradle.properties.
-# SUPABASE_ANON_KEY is a publishable client key. NEVER put the service-role key here.
-BRANDSPIRE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
-BRANDSPIRE_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
+# Firebase API keys are public client configuration; never put server credentials here.
+BRANDSPIRE_FIREBASE_API_KEY=YOUR_FIREBASE_WEB_API_KEY
 
 # Android emulator -> Windows host localhost
 BRANDSPIRE_API_BASE_URL=http://10.0.2.2:3001

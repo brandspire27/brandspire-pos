@@ -6,7 +6,7 @@ import OwnerShell from '@/components/pos/OwnerShell';
 import WorkspaceLoader from '@/components/pos/WorkspaceLoader';
 import { formatINR, getCurrentOrganization, type CurrentOrganization } from '@/lib/pos';
 import { posText } from '@/lib/pos-i18n';
-import { getSupabaseBrowserClient } from '@/lib/supabase';
+import { addCustomer as createCustomer, listCustomers, removeCustomer as deleteCustomer } from '@/lib/pos-api';
 
 type Customer = { id:string; name:string; phone:string|null; email:string|null; address:string|null; state:string|null; gstin:string|null; outstanding_balance:number; created_at:string };
 const emptyForm = { name:'', phone:'', email:'', address:'', state:'', gstin:'', notes:'' };
@@ -22,8 +22,8 @@ export default function CustomersPage() {
   const [error,setError]=useState('');
 
   const loadCustomers=useCallback(async(organizationId:string)=>{
-    const {data,error:loadError}=await getSupabaseBrowserClient().from('customers').select('id,name,phone,email,address,state,gstin,outstanding_balance,created_at').eq('organization_id',organizationId).is('deleted_at',null).order('created_at',{ascending:false}).limit(200);
-    if(loadError)throw loadError;setCustomers((data??[]) as Customer[]);
+    void organizationId;
+    const response=await listCustomers('',false,200);setCustomers(response.data as unknown as Customer[]);
   },[]);
 
   useEffect(()=>{getCurrentOrganization().then(async current=>{if(!current)return router.replace('/auth/login');if(current.role!=='OWNER')return router.replace('/staff');setOrg(current);try{await loadCustomers(current.organizationId);}catch(err){setError(err instanceof Error?err.message:'Could not load customers.');}});},[loadCustomers,router]);
@@ -31,8 +31,8 @@ export default function CustomersPage() {
   const filtered=useMemo(()=>{const text=query.toLowerCase().trim();if(!text)return customers;return customers.filter(c=>[c.name,c.phone,c.email,c.gstin].some(v=>String(v??'').toLowerCase().includes(text)));},[customers,query]);
   const t=posText(org?.preferredLanguage??'en');
 
-  async function addCustomer(event:FormEvent){event.preventDefault();if(!org||!form.name.trim())return;setSaving(true);setError('');const {error:insertError}=await getSupabaseBrowserClient().from('customers').insert({organization_id:org.organizationId,name:form.name.trim(),phone:form.phone.trim()||null,email:form.email.trim()||null,address:form.address.trim()||null,state:form.state.trim()||null,gstin:form.gstin.trim().toUpperCase()||null,notes:form.notes.trim()||null});setSaving(false);if(insertError)return setError(insertError.message);setForm(emptyForm);setShowForm(false);await loadCustomers(org.organizationId);}
-  async function removeCustomer(customer:Customer){if(!org||!window.confirm(`${t.removeCustomerConfirm}\n${customer.name}`))return;const {error:deleteError}=await getSupabaseBrowserClient().from('customers').update({deleted_at:new Date().toISOString(),active:false}).eq('id',customer.id).eq('organization_id',org.organizationId);if(deleteError)return setError(deleteError.message);await loadCustomers(org.organizationId);}
+  async function addCustomer(event:FormEvent){event.preventDefault();if(!org||!form.name.trim())return;setSaving(true);setError('');try{await createCustomer({name:form.name.trim(),phone:form.phone.trim()||null,email:form.email.trim()||null,address:form.address.trim()||null,state:form.state.trim()||null,gstin:form.gstin.trim().toUpperCase()||null,notes:form.notes.trim()||null});setForm(emptyForm);setShowForm(false);await loadCustomers(org.organizationId);}catch(reason){setError(reason instanceof Error?reason.message:'Could not save customer.');}finally{setSaving(false);}}
+  async function removeCustomer(customer:Customer){if(!org||!window.confirm(`${t.removeCustomerConfirm}\n${customer.name}`))return;try{await deleteCustomer(customer.id);await loadCustomers(org.organizationId);}catch(reason){setError(reason instanceof Error?reason.message:'Could not remove customer.');}}
 
   if(!org)return <WorkspaceLoader/>;
 

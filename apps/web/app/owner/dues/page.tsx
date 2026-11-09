@@ -6,7 +6,7 @@ import OwnerShell from '@/components/pos/OwnerShell';
 import WorkspaceLoader from '@/components/pos/WorkspaceLoader';
 import { formatDateTime, formatINR, getCurrentOrganization, type CurrentOrganization } from '@/lib/pos';
 import { localizedStatus, posText } from '@/lib/pos-i18n';
-import { getSupabaseBrowserClient } from '@/lib/supabase';
+import { collectInvoicePayment, listInvoices } from '@/lib/pos-api';
 
 type DueInvoice = {
   id: string;
@@ -44,17 +44,12 @@ export default function OwnerDuesPage(){
   const loadDues=useCallback(async()=>{
     if(!org)return;
     setLoading(true);setError('');
-    const {data,error:loadError}=await getSupabaseBrowserClient()
-      .from('invoices')
-      .select('id,invoice_number,customer_id,grand_total,amount_paid,amount_due,payment_status,created_at,customers(name,phone)')
-      .eq('organization_id',org.organizationId)
-      .gt('amount_due',0)
-      .not('status','in','(CANCELLED,REFUNDED)')
-      .order('created_at',{ascending:false})
-      .limit(100);
-    if(loadError)setError(loadError.message);
-    else setInvoices((data??[]) as unknown as DueInvoice[]);
-    setLoading(false);
+    try {
+      const result=await listInvoices({due:true,limit:100});
+      setInvoices((result.data as unknown as Array<Record<string,unknown>>).map(row=>({...row,customers:row.customer_name?{name:String(row.customer_name),phone:row.customer_phone as string|null}:null})) as unknown as DueInvoice[]);
+    } catch(reason) {
+      setError(reason instanceof Error?reason.message:'Could not load outstanding invoices.');
+    } finally {setLoading(false);}
   },[org]);
 
   useEffect(()=>{void loadDues();},[loadDues]);
@@ -75,13 +70,14 @@ export default function OwnerDuesPage(){
     if(!Number.isFinite(numericAmount)||numericAmount<=0){setError(t.enterValidPayment);return;}
     if(numericAmount>Number(selected.amount_due)){const msg=org.preferredLanguage==='hi'?`भुगतान ${formatINR(selected.amount_due)} से अधिक नहीं हो सकता।`:org.preferredLanguage==='hinglish'?`Payment ${formatINR(selected.amount_due)} se zyada nahi ho sakta.`:`Payment cannot exceed ${formatINR(selected.amount_due)}.`;setError(msg);return;}
     setSaving(true);setError('');setSuccess('');
-    const {data,error:paymentError}=await getSupabaseBrowserClient().rpc('collect_invoice_payment',{
-      p_organization_id:org.organizationId,p_invoice_id:selected.id,p_amount:numericAmount,p_method:method,p_note:note.trim()||null
-    });
-    if(paymentError){setError(paymentError.message);setSaving(false);return;}
-    const result=Array.isArray(data)?data[0]:data;
-    setSuccess(result?.amount_due>0?`${t.paymentRecorded} ${formatINR(result.amount_due)} ${t.stillDue}`:`${t.paymentRecorded} ${t.invoiceFullyPaid}`);
-    setSelectedId('');setAmount('');setNote('');await loadDues();setSaving(false);
+    try {
+      const response=await collectInvoicePayment(selected.id,{amount:numericAmount,method,note:note.trim()||undefined});
+      const result=response.data as {amountDue:number};
+      setSuccess(result.amountDue>0?`${t.paymentRecorded} ${formatINR(result.amountDue)} ${t.stillDue}`:`${t.paymentRecorded} ${t.invoiceFullyPaid}`);
+      setSelectedId('');setAmount('');setNote('');await loadDues();
+    } catch(reason) {
+      setError(reason instanceof Error?reason.message:'Could not record payment.');
+    } finally {setSaving(false);}
   }
 
   if(!org)return <WorkspaceLoader />;
