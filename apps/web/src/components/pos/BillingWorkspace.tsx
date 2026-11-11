@@ -10,6 +10,8 @@ import BillingQuickAdd from '@/components/pos/BillingQuickAdd';
 import { formatINR, getCurrentOrganization, isSubscriptionUsable, type CurrentOrganization } from '@/lib/pos';
 import { createInvoice, getBillingPolicy, listCustomers, listProducts } from '@/lib/pos-api';
 import { posText } from '@/lib/pos-i18n';
+import { getFirebaseAuth } from '@/lib/firebase';
+import { clearRecovery, readRecovery, recoveryKey, saveRecovery, type BillingRecovery } from '@/lib/billing-recovery';
 
 type Product={id:string;name:string;sku:string|null;barcode:string|null;selling_price:number;tax_rate:number;tax_inclusive:boolean;stock:number;unit:string};
 type Customer={id:string;name:string;phone:string|null};
@@ -43,6 +45,29 @@ export default function BillingWorkspace({portal}:Props){
   const[catalogBusy,setCatalogBusy]=useState(false);
   const[error,setError]=useState('');
   const[success,setSuccess]=useState<{id:string;invoiceNumber:string;total:number}|null>(null);
+  const [recovery,setRecovery]=useState<BillingRecovery|null>(null);
+  const [recoveryReady,setRecoveryReady]=useState(false);
+  const [storageError,setStorageError]=useState('');
+  const recoveryStorageKey=useRef<string|null>(null);
+  const snapshot=():BillingRecovery=>({version:1,savedAt:Date.now(),cart,customerId,discountType,discountValue,paymentMethod,amountPaid,pendingInvoice:pendingInvoice.current});
+  useEffect(()=>{
+    if(!org)return;
+    const uid=getFirebaseAuth().currentUser?.uid;
+    if(!uid)return;
+    const key=recoveryKey(uid,org.organizationId);recoveryStorageKey.current=key;
+    try{const saved=readRecovery(key);if(saved?.cart.length){setRecovery(saved);return;}setRecoveryReady(true);}
+    catch{setStorageError('Device storage could not be read. Keep this page open until your bill is saved.');}
+  },[org]);
+  useEffect(()=>{
+    if(!recoveryReady||!recoveryStorageKey.current)return;
+    try{saveRecovery(recoveryStorageKey.current,snapshot());setStorageError('');}
+    catch{setStorageError('Draft could not be saved on this device. Do not close this page.');}
+  },[cart,customerId,discountType,discountValue,paymentMethod,amountPaid,recoveryReady]);
+  function restoreDraft(){
+    if(!recovery)return;
+    setCart(recovery.cart as CartItem[]);setCustomerId(recovery.customerId);setDiscountType(recovery.discountType);setDiscountValue(recovery.discountValue);setPaymentMethod(recovery.paymentMethod);setAmountPaid(recovery.amountPaid);pendingInvoice.current=recovery.pendingInvoice;
+    setRecovery(null);setRecoveryReady(true);
+  }
 
   useEffect(()=>{
     async function load(){
@@ -151,6 +176,7 @@ export default function BillingWorkspace({portal}:Props){
   }
 
   async function createBill(items=cart, fromAssistant=false){
+    if(recovery){setError('Restore the saved draft before creating a new bill.');if(fromAssistant)throw new Error('Restore the saved draft first.');return;}
     if(!org||items.length===0||submitting.current){if(fromAssistant)throw new Error('Wait for the current bill to finish.');return;}
     submitting.current=true;
     setCreating(true);setError('');setSuccess(null);
@@ -166,7 +192,10 @@ export default function BillingWorkspace({portal}:Props){
       };
       const fingerprint=JSON.stringify(input);
       if(pendingInvoice.current?.fingerprint!==fingerprint)pendingInvoice.current={fingerprint,id:crypto.randomUUID()};
+      if(!recoveryStorageKey.current)throw new Error('Device recovery is not ready. Please reload and sign in again.');
+      saveRecovery(recoveryStorageKey.current,{...snapshot(),cart:items,pendingInvoice:pendingInvoice.current});
       const response=await createInvoice({...input,clientInvoiceId:pendingInvoice.current.id});
+      try{clearRecovery(recoveryStorageKey.current);}catch{setStorageError('Bill saved, but the local recovery copy could not be cleared. Retry will use the same invoice ID.');}
       pendingInvoice.current=null;
       const result=response.data;
       setSuccess({id:result.invoice_id,invoiceNumber:result.invoice_number,total:Number(result.grand_total??estimated.total)});
@@ -191,6 +220,9 @@ export default function BillingWorkspace({portal}:Props){
   const searchStatus=org.preferredLanguage==='hi'?'पूरे कैटलॉग में खोज रहे हैं…':org.preferredLanguage==='hinglish'?'Poore catalog mein search ho raha hai…':'Searching the full catalog…';
 
   return <Shell businessName={org.organizationName} language={org.preferredLanguage}>
+    {storageError&&<p className="form-error" role="alert">{storageError}</p>}
+    {recovery&&<section className="card"><h2>पिछला अधूरा बिल मिला / Saved draft found</h2><p>{recovery.cart.length} items · {new Date(recovery.savedAt).toLocaleString()}. This is a recovery copy, not proof of a completed invoice. Restore it to safely retry.</p><button className="btn btn-primary" onClick={restoreDraft}>अधूरा बिल खोलें / Restore draft</button></section>}
+    {recoveryReady&&cart.length>0&&!storageError&&<p role="status">ड्राफ्ट इस डिवाइस पर सुरक्षित है। Bill is final only after server confirmation.</p>}
     <BillingQuickAdd hindi={org.preferredLanguage!=='en'} disabled={creating} onCustomer={customer=>{setCustomers(current=>[customer,...current]);setCustomerId(customer.id);}} onProduct={product=>{setProducts(current=>mergeProducts(current,[product]));addProduct(product);}}/>
     <PosAssist mode="bill" confirmLabel="Confirm & save bill" reviewContext={`Adds to current cart (${cart.length} lines). Customer: ${customers.find(c=>c.id===customerId)?.name??'Walk-in'}. Payment: ${paymentMethod}. Paid: ${amountPaid || (paymentMethod==='CREDIT'?'0':'full')}. Discount: ${effectiveDiscount}${effectiveType==='PERCENT'?'%':' INR'}. Change these below before confirming.`} onConfirm={async draft=>{
       const next=cart.map(item=>({...item}));
