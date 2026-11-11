@@ -1388,3 +1388,6 @@ button { min-height: 44px; }
     transition-duration: .001ms !important;
   }
 }
+
+.voice-counter-mic{display:block;width:100%;min-height:88px;border:0;border-radius:20px;background:#244bd9;color:white;font-size:clamp(22px,3vw,30px);font-weight:700;cursor:pointer;margin:20px 0}.voice-counter-mic:disabled{opacity:.55;cursor:wait}.voice-counter-save{min-height:64px;background:#157347!important;font-size:22px!important;margin:16px 8px 16px 0}.voice-counter button:focus-visible{outline:3px solid #f2b705;outline-offset:4px}.voice-counter details{margin:20px 0}.voice-counter summary{cursor:pointer;min-height:48px;padding:12px}.voice-counter fieldset{display:grid;gap:12px}.voice-counter .btn{min-height:48px}
+
