@@ -43,3 +43,10 @@ try {
   }
 } finally { console.error = originalError; }
 console.log('Error filter passed: safe AI messages visible; other server errors redacted.');
+const productId = '11111111-1111-4111-8111-111111111111';
+const billing = new PosAssistService({ listProducts: async () => [{id:productId,name:'Milk',stock:10}] });
+globalThis.fetch = async () => Response.json({ choices: [{message:{content:JSON.stringify({items:[{productId,quantity:1}],unresolved:['Bread not found']})}}] });
+await assert.rejects(billing.draft('org',{mode:'bill',text:'Please bill milk and bread'}), /Please clarify/);
+globalThis.fetch = async () => Response.json({ choices: [{message:{content:JSON.stringify({items:[{productId,quantity:1}],unresolved:[]})}}] });
+assert.equal((await billing.draft('org',{mode:'bill',text:'Please bill one milk'})).items[0].quantity,1);
+console.log('Cloud bill clarification checks passed.');

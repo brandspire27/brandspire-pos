@@ -40,7 +40,12 @@ export default function BillingQuickAdd({ onCustomer, onProduct, hindi, disabled
     </div>
     {mode && <>
       <h2>{mode==='customer'?(hindi?'Customer add karke select karo':'Add and select customer'):(hindi?'Product save karke bill mein daalo':'Save product and add to bill')}</h2>
-      {mode==='product' && <details><summary>🎙 {hindi?'Voice ya photo se product bharo':'Fill product using voice or photo'}</summary><PosAssist mode="product" onDraft={value=>{setName(String(value.name??''));setPrice(value.selling_price==null?'':String(value.selling_price));}} /></details>}
+      {mode==='product' && <PosAssist mode="product" confirmLabel="Save product & add to bill" onConfirm={async value=>{
+        if(disabled)throw new Error('Wait for the current bill to finish.');
+        if(value.selling_price==null || Number(value.stock??0)<1)throw new Error('Enter a price and opening stock of at least 1 to add this product to the bill.');
+        const product={name:String(value.name),selling_price:Number(value.selling_price),stock:Number(value.stock),unit:String(value.unit??'pcs'),tax_rate:Number(value.tax_rate??0),tax_inclusive:Boolean(value.tax_inclusive),sku:null,barcode:null};
+        const result=await addProduct(product);onProduct({...product,id:result.data.id});setMode(null);
+      }} onDraft={value=>{setName(String(value.name??''));setPrice(value.selling_price==null?'':String(value.selling_price));}} />}
       <form onSubmit={save}><fieldset disabled={busy||disabled} style={{border:0,padding:0,margin:0}}><div className="grid-2">
         <div className="field"><label htmlFor="quick-name">{mode==='customer'?'Customer name':'Product name'} *</label><input id="quick-name" className="input" required maxLength={160} value={name} onChange={e=>setName(e.target.value)} /></div>
         {mode==='customer'?<>

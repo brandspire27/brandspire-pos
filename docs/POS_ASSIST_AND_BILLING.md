@@ -14,6 +14,12 @@ Implemented for the web owner product page and owner/staff billing workspace.
 
 ## Assisted entry
 
+### Quick confirmation flow
+
+Voice now automatically prepares a preview after transcription. Typed input uses Preview. Products can be saved directly from the editable preview (name, per-unit price, stock, unit, tax); omitted stock/tax default visibly to zero. Billing can confirm and save directly using the current customer, payment and discount settings, merging with existing cart items. The usual invoice idempotency key and server validation remain in use. More details/Edit in cart remains available. Ambiguous cloud bill items must be returned in `unresolved` and block confirmation. Browser acceptance testing is still required; this does not guarantee instantaneous cloud latency.
+
+The quick flow supports one new product per request, and bills from existing products. Creating multiple new products/customers and an invoice from one utterance is not implemented. Payment/customer/discount commands require manual selection and are requested as clarifications. Product creation still uses the existing non-idempotent product endpoint; after an uncertain network failure, check the catalog before retrying.
+
 ### Key-free basic drafts
 
 Without any cloud AI key, product entry accepts an explicit price: `Milk @ 60`, `Milk 60 rupees`, or `दूध ६० रुपये`. Bill entry accepts `2 Milk, 1 Bread` or `Milk x 2`; fractional quantities are supported. Browser speech can populate the same text, but spoken number words and arbitrary natural language are not parsed locally. This is a constrained parser, not a local AI model.

@@ -10,8 +10,8 @@ const inputSchema = z.object({
   text: z.string().trim().max(2000).default(''),
   image: z.string().max(2800000).regex(/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/).optional()
 }).refine(value => value.text.length > 0 || !!value.image, 'Enter instructions or choose a photo');
-const productSchema = z.object({ name: z.string().trim().min(1).max(160), selling_price: z.number().min(0).nullable() });
-const billSchema = z.object({ items: z.array(z.object({ productId: z.string().uuid(), quantity: z.number().positive().max(100000) })).min(1).max(100) });
+const productSchema = z.object({ name: z.string().trim().min(1).max(160), selling_price: z.number().min(0).nullable(), stock: z.number().min(0).nullable().optional(), unit: z.string().trim().min(1).max(30).nullable().optional(), tax_rate: z.number().min(0).max(100).nullable().optional(), tax_inclusive: z.boolean().nullable().optional() });
+const billSchema = z.object({ items: z.array(z.object({ productId: z.string().uuid(), quantity: z.number().positive().max(100000) })).min(1).max(100), unresolved: z.array(z.string().max(200)).max(100) });
 
 @Injectable()
 export class PosAssistService {
@@ -50,8 +50,8 @@ export class PosAssistService {
     }
     const catalog: Record<string, unknown>[] = mode === 'bill' ? await this.pos.listProducts(organizationId, { query: '', activeOnly: true, limit: 500 }) : [];
     const instruction = mode === 'product'
-      ? 'Extract one product from the supplied text/photo. Return JSON {"name":string,"selling_price":number|null}. Amounts are INR. Use only an explicitly stated or clearly visible price; use null when missing. Do not guess a price.'
-      : 'Prepare a bill draft from text/photo using only catalog product IDs. Return JSON {"items":[{"productId":string,"quantity":number}]}. Do not invent products or prices. Omit ambiguous or unmatched items. No matches means an empty items array.';
+      ? 'Extract one product from the supplied text/photo. Return JSON {"name":string,"selling_price":number|null}. Amounts are INR. Use only an explicitly stated or clearly visible price; use null when missing. Do not guess a price. Also return stock, unit, tax_rate and tax_inclusive when explicitly stated; otherwise null. Price must be per stated unit; if a total versus per-unit price is ambiguous, set selling_price to null. Understand Hindi, Hinglish, English and spoken number words.'
+      : 'Prepare a bill draft from text/photo using only catalog product IDs. Return JSON {"items":[{"productId":string,"quantity":number}]}. Do not invent products or prices. Also return unresolved: an array describing EVERY ambiguous, unmatched or unsupported request, including customer/payment/discount changes. Never silently omit an item. Only match products when confident. No matches means an empty items array.';
     let output: unknown;
     try {
       const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
@@ -83,6 +83,7 @@ export class PosAssistService {
     }
     const result = billSchema.safeParse(output);
     if (!result.success) throw new BadRequestException('No unambiguous catalog products found. Try exact names or SKUs.');
+    if (result.data.unresolved.length) throw new BadRequestException('Please clarify: ' + result.data.unresolved.join('; '));
     const quantities = new Map<string, number>();
     for (const item of result.data.items) quantities.set(item.productId, (quantities.get(item.productId) ?? 0) + item.quantity);
     return { items: [...quantities].map(([productId, quantity]) => {

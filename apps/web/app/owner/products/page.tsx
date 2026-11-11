@@ -22,7 +22,11 @@ export default function ProductsPage(){
   async function removeProduct(product:Product){if(!org||!window.confirm(`${t.removeProductConfirm}\n${product.name}`))return;try{await deleteProduct(product.id);await loadProducts(org.organizationId);}catch(reason){setError(reason instanceof Error?reason.message:'Could not remove product.');}}
   if(!org)return <WorkspaceLoader/>;
   return <OwnerShell businessName={org.organizationName} language={org.preferredLanguage}>
-    <PosAssist mode="product" onDraft={draft=>{setForm({...emptyForm,name:String(draft.name??''),sellingPrice:draft.selling_price==null?'':String(draft.selling_price)});setShowForm(true);}}/>
+    <PosAssist mode="product" onConfirm={async draft=>{
+      if(draft.selling_price==null)throw new Error('Enter a price first.');
+      await createProduct({name:draft.name,selling_price:draft.selling_price,stock:draft.stock??0,unit:draft.unit??'pcs',tax_rate:draft.tax_rate??0,tax_inclusive:draft.tax_inclusive??false});
+      try{await loadProducts(org.organizationId);}catch{setError('Product saved. Refresh to reload the catalog.');}
+    }} onDraft={draft=>{setForm({...emptyForm,name:String(draft.name??''),sellingPrice:draft.selling_price==null?'':String(draft.selling_price),stock:String(draft.stock??0),unit:String(draft.unit??'pcs'),taxRate:String(draft.tax_rate??0),taxInclusive:Boolean(draft.tax_inclusive)});setShowForm(true);}}/>
     <div className="content-head pos-page-head"><div><span className="page-kicker">{t.productsKicker}</span><h1>{t.productsTitle}</h1><p>{t.productsSub}</p></div><button className="btn btn-primary" onClick={()=>setShowForm(v=>!v)}>{showForm?t.close:`+ ${t.addProduct}`}</button></div>{error&&<div className="form-error">{error}</div>}
     {showForm&&<form className="card inline-form-panel" onSubmit={addProduct}><div className="form-panel-head"><div><h2>{t.newProduct}</h2><p>{t.newProductSub}</p></div></div><div className="grid-2">
       <div className="field"><label>{t.productName} *</label><input className="input" required value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></div>

@@ -150,15 +150,15 @@ export default function BillingWorkspace({portal}:Props){
     }
   }
 
-  async function createBill(){
-    if(!org||cart.length===0||submitting.current)return;
+  async function createBill(items=cart, fromAssistant=false){
+    if(!org||items.length===0||submitting.current){if(fromAssistant)throw new Error('Wait for the current bill to finish.');return;}
     submitting.current=true;
     setCreating(true);setError('');setSuccess(null);
     const paid=amountPaid===''?null:Number(amountPaid);
     try {
       const input={
         customerId:customerId||null,
-        items:cart.map(item=>({productId:item.id,quantity:item.quantity})),
+        items:items.map(item=>({productId:item.id,quantity:item.quantity})),
         discountType:effectiveType,
         discountValue:effectiveDiscount,
         paymentMethod,
@@ -177,6 +177,7 @@ export default function BillingWorkspace({portal}:Props){
       } catch { setError('Bill saved successfully. Refresh the catalog before creating another bill.'); }
     } catch (reason) {
       setError(reason instanceof Error?reason.message:'Bill could not be created. Please check stock/network and retry.');
+      if(fromAssistant)throw reason;
     } finally {
       setCreating(false);
       submitting.current=false;
@@ -191,7 +192,16 @@ export default function BillingWorkspace({portal}:Props){
 
   return <Shell businessName={org.organizationName} language={org.preferredLanguage}>
     <BillingQuickAdd hindi={org.preferredLanguage!=='en'} disabled={creating} onCustomer={customer=>{setCustomers(current=>[customer,...current]);setCustomerId(customer.id);}} onProduct={product=>{setProducts(current=>mergeProducts(current,[product]));addProduct(product);}}/>
-    <PosAssist mode="bill" onDraft={draft=>{
+    <PosAssist mode="bill" confirmLabel="Confirm & save bill" reviewContext={`Adds to current cart (${cart.length} lines). Customer: ${customers.find(c=>c.id===customerId)?.name??'Walk-in'}. Payment: ${paymentMethod}. Paid: ${amountPaid || (paymentMethod==='CREDIT'?'0':'full')}. Discount: ${effectiveDiscount}${effectiveType==='PERCENT'?'%':' INR'}. Change these below before confirming.`} onConfirm={async draft=>{
+      const next=cart.map(item=>({...item}));
+      for(const item of draft.items as {product:Product;quantity:number}[]){
+        const index=next.findIndex(row=>row.id===item.product.id);
+        const quantity=item.quantity+(index<0?0:next[index].quantity);
+        if(quantity>Number(item.product.stock))throw new Error(`Insufficient stock for ${item.product.name}.`);
+        const row={...item.product,quantity};if(index<0)next.push(row);else next[index]=row;
+      }
+      await createBill(next,true);
+    }} onDraft={draft=>{
       if(creating)throw new Error('Wait for the current bill to finish saving.');
       const items=draft.items as {product:Product;quantity:number}[];
       const next=[...cart];
@@ -217,7 +227,7 @@ export default function BillingWorkspace({portal}:Props){
           <div className="field"><label>{t.amountPaid} <span className="muted">({t.amountPaidHint})</span></label><input className="input" type="number" inputMode="decimal" min="0" step="0.01" placeholder={paymentMethod==='CREDIT'?'0':estimated.total.toFixed(2)} value={amountPaid} onChange={e=>setAmountPaid(e.target.value)}/></div>
         </div>
         <div className="bill-totals"><div><span>{t.taxable}</span><strong>{formatINR(estimated.base)}</strong></div><div><span>{t.discount}</span><strong>- {formatINR(estimated.discount)}</strong></div><div><span>GST</span><strong>{formatINR(estimated.tax)}</strong></div><div className="bill-grand"><span>{t.total}</span><strong>{formatINR(estimated.total)}</strong></div></div>
-        <button className="generate-bill" disabled={creating||cart.length===0} onClick={createBill}>{creating?t.creatingBill:`${t.createBill} · ${formatINR(estimated.total)}`}</button><p className="billing-note">{t.transactionSavedFirst}</p>
+        <button className="generate-bill" disabled={creating||cart.length===0} onClick={()=>createBill()}>{creating?t.creatingBill:`${t.createBill} · ${formatINR(estimated.total)}`}</button><p className="billing-note">{t.transactionSavedFirst}</p>
       </section>
     </div>
   </Shell>;
