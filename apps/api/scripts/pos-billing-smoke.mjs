@@ -31,6 +31,16 @@ try {
   await database.execute('UPDATE products SET selling_price=55 WHERE id=?',[offlineProduct]);
   assert.deepEqual(await service.createInvoice('org','owner','OWNER',offlineInput),savedOffline);
   assert.equal(Number((await service.product('org',offlineProduct)).stock),4);
+  // A queued sale must not become an invoice/payment when current stock or policy rejects it.
+  const beforeConflict=await database.execute('SELECT (SELECT count(*) FROM invoices) AS bills,(SELECT count(*) FROM payments) AS payments,(SELECT count(*) FROM inventory_movements) AS movements');
+  const currentSnapshot={productId:offlineProduct,quantity:8,expectedPrice:55,expectedTax:0,expectedInclusive:false};
+  await assert.rejects(service.createInvoice('org','owner','OWNER',{clientInvoiceId:randomUUID(),items:[currentSnapshot]}),/stock/);
+  await assert.rejects(service.createInvoice('org','owner','OWNER',{clientInvoiceId:randomUUID(),items:[{...currentSnapshot,quantity:1,expectedTax:18}]}),/Price or tax changed/);
+  await assert.rejects(service.createInvoice('org','owner','OWNER',{clientInvoiceId:randomUUID(),items:[{...currentSnapshot,quantity:1,expectedInclusive:true}]}),/Price or tax changed/);
+  await assert.rejects(service.createInvoice('org','owner','STAFF',{clientInvoiceId:randomUUID(),items:[{...currentSnapshot,quantity:1}],discountValue:10}),/discount/);
+  const afterConflict=await database.execute('SELECT (SELECT count(*) FROM invoices) AS bills,(SELECT count(*) FROM payments) AS payments,(SELECT count(*) FROM inventory_movements) AS movements');
+  assert.deepEqual(afterConflict.rows,beforeConflict.rows);
+  assert.equal(Number((await service.product('org',offlineProduct)).stock),4);
   for (const inclusive of [false, true]) {
     const id = await service.createProduct('org', 'owner', { name: 'Test', selling_price: inclusive ? 118 : 100, tax_rate: 18, tax_inclusive: inclusive, stock: 10 });
     const input = { items: [{ productId: id, quantity: 2 }], clientInvoiceId: randomUUID() };
