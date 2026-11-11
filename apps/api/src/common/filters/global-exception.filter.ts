@@ -1,4 +1,5 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus } from '@nestjs/common';
+import { AiProviderException } from './ai-provider.exception';
 
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
@@ -13,7 +14,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     const payload = isHttp ? exception.getResponse() : null;
 
     let message = 'Internal server error';
-    if (status < 500) {
+    if (status < 500 || exception instanceof AiProviderException) {
       if (typeof payload === 'string') message = payload;
       else if (payload && typeof payload === 'object') {
         const candidate = (payload as any).message;

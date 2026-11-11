@@ -1,4 +1,5 @@
-import { BadGatewayException, BadRequestException, Injectable } from '@nestjs/common';
+import { AiProviderException } from '../common/filters/ai-provider.exception';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { z } from 'zod';
 import { PosService } from './pos.service';
 import { localBillLines, localProductDraft } from './local-assist';
@@ -67,17 +68,17 @@ export class PosAssistService {
           : response.status === 429 ? 'AI provider quota or rate limit reached. Try later or use basic entry.'
           : response.status === 400 || response.status === 404 ? 'AI provider rejected the model or request format. Check AI_PROVIDER_MODEL.'
           : 'AI provider is temporarily unavailable. Try again later.';
-        throw new BadGatewayException(reason);
+        throw new AiProviderException(reason);
       }
       const body = await response.json() as { choices?: { message?: { content?: string } }[] };
       output = JSON.parse(body.choices?.[0]?.message?.content ?? '');
     } catch (error) {
-      if (error instanceof BadGatewayException) throw error;
-      throw new BadGatewayException('AI request timed out, failed to connect, or returned invalid JSON. Try again or use basic entry.');
+      if (error instanceof AiProviderException) throw error;
+      throw new AiProviderException('AI request timed out, failed to connect, or returned invalid JSON. Try again or use basic entry.');
     }
     if (mode === 'product') {
       const result = productSchema.safeParse(output);
-      if (!result.success) throw new BadGatewayException('No valid product was found. Enter the name and price manually.');
+      if (!result.success) throw new AiProviderException('No valid product was found. Enter the name and price manually.');
       return result.data;
     }
     const result = billSchema.safeParse(output);

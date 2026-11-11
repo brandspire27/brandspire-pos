@@ -25,3 +25,21 @@ globalThis.fetch = async (url, options) => {
 };
 assert.deepEqual(await service.draft('org', { mode: 'product', text: 'Please extract a product' }), { name: 'Milk', selling_price: 30 });
 console.log('AI configuration and mocked provider checks passed; no live provider call made.');
+const { GlobalExceptionFilter } = require('../dist/common/filters/global-exception.filter.js');
+const { AiProviderException } = require('../dist/common/filters/ai-provider.exception.js');
+const { BadGatewayException } = require('@nestjs/common');
+let responseBody;
+const response = { status() { return this; }, json(body) { responseBody = body; } };
+const host = { switchToHttp: () => ({ getResponse: () => response, getRequest: () => ({}) }) };
+const originalError = console.error;
+console.error = () => {};
+try {
+  const filter = new GlobalExceptionFilter();
+  filter.catch(new AiProviderException('AI provider quota reached.'), host);
+  assert.equal(responseBody.message, 'AI provider quota reached.');
+  for (const error of [new Error('private details'), new BadGatewayException('private upstream details')]) {
+    filter.catch(error, host);
+    assert.equal(responseBody.message, 'Internal server error');
+  }
+} finally { console.error = originalError; }
+console.log('Error filter passed: safe AI messages visible; other server errors redacted.');
