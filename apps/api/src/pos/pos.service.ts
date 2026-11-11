@@ -28,7 +28,7 @@ const productInput = z.object({
 });
 const invoiceInput = z.object({
   customerId: z.string().uuid().nullable().optional(),
-  items: z.array(z.object({ productId: z.string().uuid(), quantity: z.number().positive() })).min(1).max(500),
+  items: z.array(z.object({ productId: z.string().uuid(), quantity: z.number().positive(), expectedPrice: z.number().min(0).optional(), expectedTax: z.number().min(0).max(100).optional(), expectedInclusive: z.boolean().optional() })).min(1).max(500),
   discountType: z.enum(['PERCENT', 'FLAT']).default('PERCENT'),
   discountValue: z.number().min(0).default(0),
   paymentMethod: z.enum(['CASH', 'UPI', 'CARD', 'CREDIT', 'OTHER']).default('CASH'),
@@ -299,6 +299,11 @@ export class PosService {
     }
     const lines = value.items.map((item) => {
       const product = productsById.get(item.productId)!;
+      if ((item.expectedPrice !== undefined && item.expectedPrice !== Number(product.selling_price)) ||
+          (item.expectedTax !== undefined && item.expectedTax !== Number(product.tax_rate)) ||
+          (item.expectedInclusive !== undefined && item.expectedInclusive !== (Number(product.tax_inclusive) === 1))) {
+        throw new BadRequestException(`Price or tax changed for ${String(product.name)}. Review the pending bill before syncing.`);
+      }
       const gross = Number(product.selling_price) * item.quantity;
       const rate = Number(product.tax_rate) / 100;
       const taxable = Number(product.tax_inclusive) === 1 && rate > 0 ? gross / (1 + rate) : gross;

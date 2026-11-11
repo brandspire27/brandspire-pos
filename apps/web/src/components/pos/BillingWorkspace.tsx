@@ -12,6 +12,8 @@ import { createInvoice, getBillingPolicy, listCustomers, listProducts } from '@/
 import { posText } from '@/lib/pos-i18n';
 import { getFirebaseAuth } from '@/lib/firebase';
 import { clearRecovery, readRecovery, recoveryKey, saveRecovery, type BillingRecovery } from '@/lib/billing-recovery';
+import { pendingBill,queueBill } from '@/lib/offline-bill';
+import PendingOfflineBill from './PendingOfflineBill';
 
 type Product={id:string;name:string;sku:string|null;barcode:string|null;selling_price:number;tax_rate:number;tax_inclusive:boolean;stock:number;unit:string};
 type Customer={id:string;name:string;phone:string|null};
@@ -194,6 +196,17 @@ export default function BillingWorkspace({portal}:Props){
       if(pendingInvoice.current?.fingerprint!==fingerprint)pendingInvoice.current={fingerprint,id:crypto.randomUUID()};
       if(!recoveryStorageKey.current)throw new Error('Device recovery is not ready. Please reload and sign in again.');
       saveRecovery(recoveryStorageKey.current,{...snapshot(),cart:items,pendingInvoice:pendingInvoice.current});
+      const offlineKey=recoveryStorageKey.current;
+      const waiting=await pendingBill(offlineKey);
+      if(waiting)throw new Error('Sync the pending device bill before creating another bill.');
+      if(!navigator.onLine){
+        if(!['CASH','CREDIT'].includes(paymentMethod))throw new Error('Offline saving supports cash or credit only. Online payments need a connection.');
+        if(items.some(item=>item.quantity>Number(item.stock)))throw new Error('Insufficient cached stock.');
+        await queueBill({key:offlineKey,id:pendingInvoice.current.id,createdAt:Date.now(),lines:items.map(item=>({name:item.name,quantity:item.quantity})),input:{...input,clientInvoiceId:pendingInvoice.current.id,items:items.map(item=>({productId:item.id,quantity:item.quantity,expectedPrice:Number(item.selling_price),expectedTax:Number(item.tax_rate),expectedInclusive:item.tax_inclusive}))}});
+        clearRecovery(offlineKey);pendingInvoice.current=null;setCart([]);setCustomerId('');setDiscountValue('0');setAmountPaid('');
+        setError('इस डिवाइस पर बिल सुरक्षित है। अभी pending है; internet आने पर Sync करें।');
+        return;
+      }
       const response=await createInvoice({...input,clientInvoiceId:pendingInvoice.current.id});
       try{clearRecovery(recoveryStorageKey.current);}catch{setStorageError('Bill saved, but the local recovery copy could not be cleared. Retry will use the same invoice ID.');}
       pendingInvoice.current=null;
@@ -220,6 +233,7 @@ export default function BillingWorkspace({portal}:Props){
   const searchStatus=org.preferredLanguage==='hi'?'पूरे कैटलॉग में खोज रहे हैं…':org.preferredLanguage==='hinglish'?'Poore catalog mein search ho raha hai…':'Searching the full catalog…';
 
   return <Shell businessName={org.organizationName} language={org.preferredLanguage}>
+    <PendingOfflineBill organizationId={org.organizationId} onSynced={()=>{setError('Bill synced. Reload the catalog before the next sale.');void listProducts('',true,250).then(result=>setProducts(result.data as unknown as Product[])).catch(()=>setError('Bill synced, but catalog refresh failed. Reload before another sale.'));}} />
     {storageError&&<p className="form-error" role="alert">{storageError}</p>}
     {recovery&&<section className="card"><h2>पिछला अधूरा बिल मिला / Saved draft found</h2><p>{recovery.cart.length} items · {new Date(recovery.savedAt).toLocaleString()}. This is a recovery copy, not proof of a completed invoice. Restore it to safely retry.</p><button className="btn btn-primary" onClick={restoreDraft}>अधूरा बिल खोलें / Restore draft</button></section>}
     {recoveryReady&&cart.length>0&&!storageError&&<p role="status">ड्राफ्ट इस डिवाइस पर सुरक्षित है। Bill is final only after server confirmation.</p>}

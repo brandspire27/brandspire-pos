@@ -22,6 +22,15 @@ try {
   await database.execute("INSERT INTO organizations(id,name,slug,owner_user_id) VALUES ('org','Test','test','owner')");
   await database.execute("INSERT INTO organization_settings(organization_id) VALUES ('org')");
   const service = new PosService(database);
+  const offlineProduct=await service.createProduct('org','owner',{name:'Offline test',selling_price:50,stock:5,tax_rate:0});
+  const offlineId=randomUUID();
+  await assert.rejects(service.createInvoice('org','owner','OWNER',{clientInvoiceId:offlineId,items:[{productId:offlineProduct,quantity:1,expectedPrice:40,expectedTax:0,expectedInclusive:false}]}),/Price or tax changed/);
+  assert.equal(Number((await service.product('org',offlineProduct)).stock),5);
+  const offlineInput={clientInvoiceId:offlineId,items:[{productId:offlineProduct,quantity:1,expectedPrice:50,expectedTax:0,expectedInclusive:false}]};
+  const savedOffline=await service.createInvoice('org','owner','OWNER',offlineInput);
+  await database.execute('UPDATE products SET selling_price=55 WHERE id=?',[offlineProduct]);
+  assert.deepEqual(await service.createInvoice('org','owner','OWNER',offlineInput),savedOffline);
+  assert.equal(Number((await service.product('org',offlineProduct)).stock),4);
   for (const inclusive of [false, true]) {
     const id = await service.createProduct('org', 'owner', { name: 'Test', selling_price: inclusive ? 118 : 100, tax_rate: 18, tax_inclusive: inclusive, stock: 10 });
     const input = { items: [{ productId: id, quantity: 2 }], clientInvoiceId: randomUUID() };
@@ -33,7 +42,7 @@ try {
     await assert.rejects(service.createInvoice('org', 'owner', 'STAFF', { ...input, clientInvoiceId: randomUUID(), discountValue: 20 }), /discount/);
     await assert.rejects(service.createInvoice('org', 'owner', 'OWNER', { items: [{ productId: id, quantity: 100 }] }), /stock/);
     const count = await database.execute('SELECT count(*) AS count FROM invoices WHERE organization_id = ?', ['org']);
-    assert.equal(Number(count.rows[0].count), inclusive ? 2 : 1);
+    assert.equal(Number(count.rows[0].count), inclusive ? 3 : 2);
   }
   console.log('POS billing passed: inclusive/exclusive GST, retries, stock rollback and staff discount policy.');
 } finally { client.close(); }

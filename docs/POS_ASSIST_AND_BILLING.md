@@ -4,6 +4,12 @@ Implemented for the web owner product page and owner/staff billing workspace.
 
 ## Corrections
 
+## Limited offline queue (web)
+
+An already-loaded, authenticated billing page can save one cash/credit bill to IndexedDB when `navigator.onLine` is false. The record is scoped to the Firebase user and organization, retains its client invoice UUID and item price/tax snapshot, and is clearly pending rather than a confirmed invoice. The pending panel offers manual sync after reconnect. Existing server membership, stock, customer and discount checks still apply. Changed price/tax rejects the request; an already-created invoice returns its original result before those checks, so lost responses can be retried safely.
+
+Limits: no service worker/cold offline launch, no automatic sync or multi-bill queue, no offline AI/new product/customer creation, and no gateway payment verification. A network error while the browser reports online retains the recoverable cart instead of automatically queuing a sale. Conflict resolution needs operator review and is not yet provided in the pending panel. Browser IndexedDB/reconnect/restart acceptance testing remains required. Keep a single billing tab per account during this initial rollout. This is not full offline billing readiness.
+
 - Wait for Firebase authentication restoration before requesting an ID token.
 - Load owner and staff workspaces through the shared POS endpoint.
 - Include GST for tax-exclusive catalog products.
