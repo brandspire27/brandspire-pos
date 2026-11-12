@@ -1,4 +1,6 @@
 import { authenticatedApiRequest } from '@/lib/firebase';
+import { getFirebaseAuth } from '@/lib/firebase';
+import { getCurrentOrganization } from '@/lib/pos';
 
 type PosResponse<T> = { success: true; data: T };
 
@@ -7,8 +9,24 @@ export function listProducts(query = '', activeOnly = false, limit = 500) {
   return authenticatedApiRequest<PosResponse<Record<string, unknown>[]>>(`/pos/products?${params}`);
 }
 
-export function addProduct(input: Record<string, unknown>) {
-  return authenticatedApiRequest<PosResponse<{ id: string }>>('/pos/products', { method: 'POST', body: JSON.stringify(input) });
+export async function addProduct(input: Record<string, unknown>) {
+  if(input.id)return authenticatedApiRequest<PosResponse<{id:string}>>('/pos/products',{method:'POST',body:JSON.stringify(input)});
+  const workspace=await getCurrentOrganization();
+  const uid=getFirebaseAuth().currentUser?.uid;
+  if(!workspace||!uid)throw new Error('Sign in before adding a product.');
+  const canonical=JSON.stringify(Object.fromEntries(Object.entries(input).sort(([a],[b])=>a.localeCompare(b))));
+  const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(canonical));
+  const fingerprint=Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
+  const key=`brandspire.product-request:${uid}:${workspace.organizationId}:${fingerprint}`;
+  const send=async()=>{
+    let id:string;
+    try{id=localStorage.getItem(key)||crypto.randomUUID();localStorage.setItem(key,id);}
+    catch{throw new Error('Cannot save a safe product retry ID on this device. Check device storage before adding a product.');}
+    const result=await authenticatedApiRequest<PosResponse<{id:string}>>('/pos/products',{method:'POST',body:JSON.stringify({...input,id})});
+    try{localStorage.removeItem(key);}catch{/* Retain ID: another attempt safely returns the existing product. */}
+    return result;
+  };
+  return navigator.locks ? navigator.locks.request(key,send) : send();
 }
 
 export function removeProduct(id: string) {

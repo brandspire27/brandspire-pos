@@ -6,7 +6,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "echo \"web tests pending\""
+    "test": "echo \"web tests pending\"",
+    "test:offline": "node --experimental-strip-types scripts/offline-bill-smoke.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "latest",
@@ -23,6 +24,7 @@
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "fake-indexeddb": "6.2.8",
     "typescript": "latest"
   }
 }

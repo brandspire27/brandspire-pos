@@ -160,6 +160,13 @@ export class PosController {
     return { success: true, data: result };
   }
 
+  @Get('invoices/by-client/:clientId')
+  async invoiceByClient(@Req() request:PosRequest,@Param('clientId') clientId:string){
+    if(!/^[0-9a-f-]{36}$/i.test(clientId))throw new BadRequestException('Invalid client invoice ID');
+    const result=await this.database.execute('SELECT id,invoice_number,grand_total FROM invoices WHERE organization_id = ? AND client_invoice_id = ? LIMIT 1',[request.organizationId!,clientId]);
+    return {success:true,data:result.rows[0]??null};
+  }
+
   @Get('invoices/:id')
   async invoiceDetail(@Req() request: PosRequest, @Param('id') id: string) {
     return { success: true, data: await this.pos.invoiceDetail(request.organizationId!, id) };

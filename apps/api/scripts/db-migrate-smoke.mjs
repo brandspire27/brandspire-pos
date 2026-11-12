@@ -22,16 +22,18 @@ try {
   assert.deepEqual(migrationLogs, [
     'APPLIED 0001_turso_schema',
     'APPLIED 0002_billing_auth_fields',
+    'APPLIED 0003_product_create_requests',
     'SKIP 0001_turso_schema',
-    'SKIP 0002_billing_auth_fields'
+    'SKIP 0002_billing_auth_fields',
+    'SKIP 0003_product_create_requests'
   ]);
 
   const migrationCount = await client.execute('SELECT count(*) AS count FROM schema_migrations');
-  assert.equal(Number(migrationCount.rows[0].count), 2);
+  assert.equal(Number(migrationCount.rows[0].count), 3);
   const tables = await client.execute(
     "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
   );
-  assert.equal(Number(tables.rows[0].count), 31);
+  assert.equal(Number(tables.rows[0].count), 32);
 
   await client.execute('PRAGMA foreign_keys = ON');
   await client.execute({

@@ -1,0 +1,26 @@
+import 'fake-indexeddb/auto';
+import assert from 'node:assert/strict';
+import {pendingBill,queueBill,archivePendingBill,archivedBills,restoreArchivedBill,removePendingBill} from '../src/lib/offline-bill.ts';
+import {billingQuantity} from '../src/lib/billing-quantity.ts';
+globalThis.window=new EventTarget();
+const row={key:'user-a:shop-a',id:'request-1',createdAt:1,input:{clientInvoiceId:'request-1',paymentMethod:'CASH'},lines:[{name:'Rice',quantity:0.5}]};
+// Simulate a previously installed v1 database; upgrade must retain its pending record.
+await new Promise((resolve,reject)=>{const req=indexedDB.open('brandspire-offline-bills',1);req.onupgradeneeded=()=>req.result.createObjectStore('pending',{keyPath:'key'});req.onsuccess=()=>{const db=req.result;const tx=db.transaction('pending','readwrite');tx.objectStore('pending').add(row);tx.oncomplete=()=>{db.close();resolve();};tx.onabort=()=>reject(tx.error);};req.onerror=()=>reject(req.error);});
+assert.deepEqual(await pendingBill(row.key),row);
+assert.equal(await pendingBill('user-b:shop-a'),null);
+await assert.rejects(queueBill({...row,id:'request-2'}));
+await removePendingBill(row.key,'wrong-id');assert.deepEqual(await pendingBill(row.key),row);
+await archivePendingBill(row.key,row.id);assert.equal(await pendingBill(row.key),null);
+assert.equal((await archivedBills(row.key))[0].input.clientInvoiceId,row.id);
+assert.equal((await archivedBills('user-b:shop-a')).length,0);
+await assert.rejects(restoreArchivedBill('user-b:shop-a',row.id));
+await restoreArchivedBill(row.key,row.id);assert.equal((await pendingBill(row.key)).id,row.id);
+assert.equal((await archivedBills(row.key)).length,0);
+await removePendingBill(row.key,row.id);
+const concurrent=await Promise.allSettled([queueBill(row),queueBill({...row,id:'request-2'})]);
+assert.equal(concurrent.filter(x=>x.status==='fulfilled').length,1);
+assert.equal(concurrent.filter(x=>x.status==='rejected').length,1);
+assert.equal(billingQuantity(0.5,10),0.5);
+assert.equal(billingQuantity(1,0.25),0.25);
+for(const value of [0,-1,NaN,Infinity])assert.equal(billingQuantity(value,10),null);
+console.log('Offline store tests passed: v1 upgrade, account scope, duplicate/conflict preservation, archive/restore, concurrent insertion and fractional quantities. Simulated IndexedDB; physical restart testing remains separate.');

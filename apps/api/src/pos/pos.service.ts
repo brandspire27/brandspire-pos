@@ -1,5 +1,5 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { TursoService } from '../database/turso.service';
 
@@ -207,7 +207,16 @@ export class PosService {
     if (!parsed.success) throw new BadRequestException(parsed.error.issues[0]?.message ?? 'Invalid product details');
     const value = parsed.data;
     const productId = value.id ?? id ?? randomUUID();
+    const {id:ignoredId,...payload}=value;
+    const payloadHash=createHash('sha256').update(JSON.stringify(payload)).digest('hex');
     await this.database.transaction(async (tx) => {
+      const previous=await tx.execute({sql:'SELECT organization_id, payload_hash FROM product_create_requests WHERE product_id = ?',args:[productId]});
+      if(previous.rows.length){
+        const row=previous.rows[0];
+        if(row.organization_id!==organizationId || row.payload_hash!==payloadHash)throw new ConflictException('Product request ID is already in use. Restore the original request or start a new product.');
+        return;
+      }
+      await tx.execute({sql:'INSERT INTO product_create_requests(product_id,organization_id,payload_hash) VALUES (?,?,?)',args:[productId,organizationId,payloadHash]});
       await tx.execute({
         sql: `INSERT INTO products(id, organization_id, name, sku, barcode, unit, hsn_sac, purchase_price, selling_price,
           tax_rate, tax_inclusive, stock, low_stock_threshold, created_by)

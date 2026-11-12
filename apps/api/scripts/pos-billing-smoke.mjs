@@ -22,6 +22,15 @@ try {
   await database.execute("INSERT INTO organizations(id,name,slug,owner_user_id) VALUES ('org','Test','test','owner')");
   await database.execute("INSERT INTO organization_settings(organization_id) VALUES ('org')");
   const service = new PosService(database);
+  const productRequest={id:randomUUID(),name:'Retry product',selling_price:15,stock:7};
+  const createdId=await service.createProduct('org','owner',productRequest);
+  await database.execute('UPDATE products SET stock=6 WHERE id=?',[createdId]);
+  assert.equal(await service.createProduct('org','owner',productRequest),createdId);
+  assert.equal(Number((await service.product('org',createdId)).stock),6);
+  const opening=await database.execute("SELECT count(*) AS count FROM inventory_movements WHERE product_id=? AND movement_type='OPENING'",[createdId]);
+  assert.equal(Number(opening.rows[0].count),1);
+  await assert.rejects(service.createProduct('org','owner',{...productRequest,stock:9}),/request ID/);
+  await assert.rejects(service.createProduct('different-shop','owner',productRequest),/request ID/);
   const offlineProduct=await service.createProduct('org','owner',{name:'Offline test',selling_price:50,stock:5,tax_rate:0});
   const offlineId=randomUUID();
   await assert.rejects(service.createInvoice('org','owner','OWNER',{clientInvoiceId:offlineId,items:[{productId:offlineProduct,quantity:1,expectedPrice:40,expectedTax:0,expectedInclusive:false}]}),/Price or tax changed/);

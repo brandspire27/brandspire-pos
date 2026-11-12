@@ -14,6 +14,8 @@ import { getFirebaseAuth } from '@/lib/firebase';
 import { clearRecovery, readRecovery, recoveryKey, saveRecovery, type BillingRecovery } from '@/lib/billing-recovery';
 import { pendingBill,queueBill } from '@/lib/offline-bill';
 import PendingOfflineBill from './PendingOfflineBill';
+import QuantityInput from './QuantityInput';
+import { billingQuantity } from '@/lib/billing-quantity';
 
 type Product={id:string;name:string;sku:string|null;barcode:string|null;selling_price:number;tax_rate:number;tax_inclusive:boolean;stock:number;unit:string};
 type Customer={id:string;name:string;phone:string|null};
@@ -144,13 +146,17 @@ export default function BillingWorkspace({portal}:Props){
       const existing=current.find(item=>item.id===product.id);
       if(existing)return current.map(item=>item.id===product.id?{...item,quantity:Math.min(item.quantity+1,Number(product.stock))}:item);
       if(Number(product.stock)<=0)return current;
-      return[...current,{...product,quantity:1}];
+      return[...current,{...product,quantity:Math.min(1,Number(product.stock))}];
     });
     setQuery('');setRemoteProducts([]);
   }
 
   function setQuantity(productId:string,quantity:number){
-    setCart(current=>current.map(item=>item.id===productId?{...item,quantity:Math.max(1,Math.min(quantity,Number(item.stock)))}:item));
+    setCart(current=>current.map(item=>{
+      if(item.id!==productId)return item;
+      const next=billingQuantity(quantity,Number(item.stock));
+      return next===null?item:{...item,quantity:next};
+    }));
   }
 
   async function handleSearchKeyDown(event:KeyboardEvent<HTMLInputElement>){
@@ -266,7 +272,7 @@ export default function BillingWorkspace({portal}:Props){
     {success&&<div className="bill-success" role="status"><div><span>{t.billCreated}</span><h2>{success.invoiceNumber}</h2><p>{formatINR(success.total)} · {t.stockUpdated}</p></div><div className="hero-actions" style={{marginTop:0}}>{success.id&&<button className="btn btn-primary" onClick={()=>router.push(`${base}/invoices/${success.id}`)}>{t.viewPrint}</button>}<button className="btn" onClick={()=>setSuccess(null)}>{t.newBill}</button></div></div>}
     <div className="billing-grid premium-counter">
       <section className="card billing-products"><div className="billing-search"><span className="search-mark" aria-hidden="true">⌕</span><input autoFocus aria-label={t.scanSearch} autoComplete="off" className="input" placeholder={t.scanSearch} value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={handleSearchKeyDown}/></div>{catalogBusy&&<div className="catalog-search-state" role="status">{searchStatus}</div>}<div className="product-picker">{filteredProducts.map(product=><button type="button" key={product.id} className="product-pick" disabled={Number(product.stock)<=0} onClick={()=>addProduct(product)}><span><strong>{product.name}</strong><small>{product.sku||product.barcode||`${Number(product.tax_rate)}% GST`}</small></span><span className="product-pick-right"><strong>{formatINR(product.selling_price)}</strong><small className={Number(product.stock)<=5?'stock-low':''}>{Number(product.stock)} {product.unit}</small></span></button>)}{filteredProducts.length===0&&!catalogBusy&&<div className="empty-state">{t.noMatchingProducts}</div>}</div></section>
-      <section className="card bill-cart"><div className="bill-cart-head"><div><span className="page-kicker">{t.currentBill}</span><h2>{cart.length} {cart.length===1?t.item:t.items}</h2></div><button type="button" className="text-danger" onClick={()=>setCart([])}>{t.clear}</button></div><div className="cart-list">{cart.length===0?<div className="empty-state bill-empty"><span className="empty-receipt" aria-hidden="true">▤</span><strong>{t.startProduct}</strong><br/>{t.searchTapAdd}</div>:cart.map(item=><div className="cart-row" key={item.id}><div><strong>{item.name}</strong><small>{formatINR(item.selling_price)} · {Number(item.tax_rate)}% GST</small></div><div className="qty-control" aria-label={`${item.name} quantity`}><button type="button" aria-label={`Reduce ${item.name} quantity`} onClick={()=>setQuantity(item.id,item.quantity-1)}>-</button><input aria-label={`${item.name} quantity`} inputMode="numeric" value={item.quantity} onChange={e=>setQuantity(item.id,Number(e.target.value||1))}/><button type="button" aria-label={`Increase ${item.name} quantity`} onClick={()=>setQuantity(item.id,item.quantity+1)}>+</button></div><strong>{formatINR(Number(item.selling_price)*item.quantity)}</strong><button type="button" aria-label={`Remove ${item.name}`} className="cart-remove" onClick={()=>setCart(c=>c.filter(x=>x.id!==item.id))}>×</button></div>)}</div>
+      <section className="card bill-cart"><div className="bill-cart-head"><div><span className="page-kicker">{t.currentBill}</span><h2>{cart.length} {cart.length===1?t.item:t.items}</h2></div><button type="button" className="text-danger" onClick={()=>setCart([])}>{t.clear}</button></div><div className="cart-list">{cart.length===0?<div className="empty-state bill-empty"><span className="empty-receipt" aria-hidden="true">▤</span><strong>{t.startProduct}</strong><br/>{t.searchTapAdd}</div>:cart.map(item=><div className="cart-row" key={item.id}><div><strong>{item.name}</strong><small>{formatINR(item.selling_price)} · {Number(item.tax_rate)}% GST</small></div><div className="qty-control" aria-label={`${item.name} quantity`}><button type="button" aria-label={`Reduce ${item.name} quantity`} onClick={()=>setQuantity(item.id,item.quantity-1)}>-</button><QuantityInput name={item.name} value={item.quantity} stock={Number(item.stock)} onCommit={quantity=>setQuantity(item.id,quantity)}/><button type="button" aria-label={`Increase ${item.name} quantity`} onClick={()=>setQuantity(item.id,item.quantity+1)}>+</button></div><strong>{formatINR(Number(item.selling_price)*item.quantity)}</strong><button type="button" aria-label={`Remove ${item.name}`} className="cart-remove" onClick={()=>setCart(c=>c.filter(x=>x.id!==item.id))}>×</button></div>)}</div>
         <div className="bill-options"><div className="field"><label>{t.customer}</label><select className="select" value={customerId} onChange={e=>setCustomerId(e.target.value)}><option value="">{t.walkInCustomer}</option>{customers.map(c=><option key={c.id} value={c.id}>{c.name}{c.phone?` · ${c.phone}`:''}</option>)}</select></div>
           {portal==='owner'?<div className="discount-row"><div className="field"><label>{t.discount}</label><select className="select" value={discountType} onChange={e=>setDiscountType(e.target.value as 'PERCENT'|'FLAT')}><option value="PERCENT">{t.percentage}</option><option value="FLAT">{t.flat}</option></select></div><div className="field"><label>{t.value}</label><input className="input" type="number" min="0" step="0.01" value={discountValue} onChange={e=>setDiscountValue(e.target.value)}/></div></div>:policy.allowStaffDiscount?<div className="field"><label>{t.discount} % <span className="muted">({t.ownerDiscountLimit} {policy.staffDiscountLimit}%)</span></label><input className="input" type="number" min="0" max={policy.staffDiscountLimit} step="0.5" value={discountValue} onChange={e=>setDiscountValue(e.target.value)}/></div>:<div className="staff-policy-note">{t.discountOwnerOnly}</div>}
           <div className="payment-methods" aria-label="Payment method">{['CASH','UPI','CARD','CREDIT'].map(method=><button type="button" aria-pressed={paymentMethod===method} className={paymentMethod===method?'active':''} key={method} onClick={()=>setPaymentMethod(method)}>{method}</button>)}</div>
