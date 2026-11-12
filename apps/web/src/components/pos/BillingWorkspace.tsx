@@ -12,7 +12,7 @@ import { createInvoice, getBillingPolicy, listCustomers, listProducts } from '@/
 import { posText } from '@/lib/pos-i18n';
 import { getFirebaseAuth } from '@/lib/firebase';
 import { clearRecovery, readRecovery, recoveryKey, saveRecovery, type BillingRecovery } from '@/lib/billing-recovery';
-import { pendingBill,queueBill } from '@/lib/offline-bill';
+import { pendingBills,queueBill } from '@/lib/offline-bill';
 import PendingOfflineBill from './PendingOfflineBill';
 import QuantityInput from './QuantityInput';
 import { billingQuantity } from '@/lib/billing-quantity';
@@ -203,16 +203,15 @@ export default function BillingWorkspace({portal}:Props){
       if(!recoveryStorageKey.current)throw new Error('Device recovery is not ready. Please reload and sign in again.');
       saveRecovery(recoveryStorageKey.current,{...snapshot(),cart:items,pendingInvoice:pendingInvoice.current});
       const offlineKey=recoveryStorageKey.current;
-      const waiting=await pendingBill(offlineKey);
-      if(waiting)throw new Error('Sync the pending device bill before creating another bill.');
       if(!navigator.onLine){
         if(!['CASH','CREDIT'].includes(paymentMethod))throw new Error('Offline saving supports cash or credit only. Online payments need a connection.');
         if(items.some(item=>item.quantity>Number(item.stock)))throw new Error('Insufficient cached stock.');
-        await queueBill({key:offlineKey,id:pendingInvoice.current.id,createdAt:Date.now(),lines:items.map(item=>({name:item.name,quantity:item.quantity})),input:{...input,clientInvoiceId:pendingInvoice.current.id,items:items.map(item=>({productId:item.id,quantity:item.quantity,expectedPrice:Number(item.selling_price),expectedTax:Number(item.tax_rate),expectedInclusive:item.tax_inclusive}))}});
+        await queueBill({key:offlineKey,id:pendingInvoice.current.id,createdAt:Date.now(),lines:items.map(item=>({name:item.name,quantity:item.quantity})),input:{...input,clientInvoiceId:pendingInvoice.current.id,items:items.map(item=>({productId:item.id,quantity:item.quantity,expectedPrice:Number(item.selling_price),expectedTax:Number(item.tax_rate),expectedInclusive:item.tax_inclusive}))}},Object.fromEntries(items.map(item=>[item.id,Number(item.stock)])));
         clearRecovery(offlineKey);pendingInvoice.current=null;setCart([]);setCustomerId('');setDiscountValue('0');setAmountPaid('');
         setError('इस डिवाइस पर बिल सुरक्षित है। अभी pending है; internet आने पर Sync करें।');
         return;
       }
+      if((await pendingBills(offlineKey)).length)throw new Error('Sync pending device bills before creating an online bill so stock stays correct.');
       const response=await createInvoice({...input,clientInvoiceId:pendingInvoice.current.id});
       try{clearRecovery(recoveryStorageKey.current);}catch{setStorageError('Bill saved, but the local recovery copy could not be cleared. Retry will use the same invoice ID.');}
       pendingInvoice.current=null;

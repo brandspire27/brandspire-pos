@@ -1,14 +1,19 @@
 import 'fake-indexeddb/auto';
 import assert from 'node:assert/strict';
-import {pendingBill,queueBill,archivePendingBill,archivedBills,restoreArchivedBill,removePendingBill} from '../src/lib/offline-bill.ts';
+import {pendingBills,pendingBill,queueBill,archivePendingBill,archivedBills,restoreArchivedBill,removePendingBill} from '../src/lib/offline-bill.ts';
 import {billingQuantity} from '../src/lib/billing-quantity.ts';
 globalThis.window=new EventTarget();
 const row={key:'user-a:shop-a',id:'request-1',createdAt:1,input:{clientInvoiceId:'request-1',paymentMethod:'CASH'},lines:[{name:'Rice',quantity:0.5}]};
-// Simulate a previously installed v1 database; upgrade must retain its pending record.
-await new Promise((resolve,reject)=>{const req=indexedDB.open('brandspire-offline-bills',1);req.onupgradeneeded=()=>req.result.createObjectStore('pending',{keyPath:'key'});req.onsuccess=()=>{const db=req.result;const tx=db.transaction('pending','readwrite');tx.objectStore('pending').add(row);tx.oncomplete=()=>{db.close();resolve();};tx.onabort=()=>reject(tx.error);};req.onerror=()=>reject(req.error);});
+// Exercise both deployed schemas, including archive preservation on v2.
+const legacyVersion=Number(process.env.LEGACY_DB_VERSION??1);
+await new Promise((resolve,reject)=>{const req=indexedDB.open('brandspire-offline-bills',legacyVersion);req.onupgradeneeded=()=>{req.result.createObjectStore('pending',{keyPath:'key'});if(legacyVersion===2)req.result.createObjectStore('archive',{keyPath:'id'});};req.onsuccess=()=>{const db=req.result;const tx=db.transaction(legacyVersion===2?['pending','archive']:['pending'],'readwrite');tx.objectStore('pending').add(row);if(legacyVersion===2)tx.objectStore('archive').add({...row,id:'old-archive'});tx.oncomplete=()=>{db.close();resolve();};tx.onabort=()=>reject(tx.error);};req.onerror=()=>reject(req.error);});
 assert.deepEqual(await pendingBill(row.key),row);
+if(legacyVersion===2){assert.equal((await archivedBills(row.key))[0].id,'old-archive');await restoreArchivedBill(row.key,'old-archive');await removePendingBill(row.key,'old-archive');}
 assert.equal(await pendingBill('user-b:shop-a'),null);
-await assert.rejects(queueBill({...row,id:'request-2'}));
+await assert.rejects(queueBill(row));
+await queueBill({...row,id:'request-2'});
+assert.equal((await pendingBills(row.key)).length,2);
+await removePendingBill(row.key,'request-2');
 await removePendingBill(row.key,'wrong-id');assert.deepEqual(await pendingBill(row.key),row);
 await archivePendingBill(row.key,row.id);assert.equal(await pendingBill(row.key),null);
 assert.equal((await archivedBills(row.key))[0].input.clientInvoiceId,row.id);
@@ -18,9 +23,18 @@ await restoreArchivedBill(row.key,row.id);assert.equal((await pendingBill(row.ke
 assert.equal((await archivedBills(row.key)).length,0);
 await removePendingBill(row.key,row.id);
 const concurrent=await Promise.allSettled([queueBill(row),queueBill({...row,id:'request-2'})]);
-assert.equal(concurrent.filter(x=>x.status==='fulfilled').length,1);
-assert.equal(concurrent.filter(x=>x.status==='rejected').length,1);
+assert.equal(concurrent.filter(x=>x.status==='fulfilled').length,2);
+assert.equal(concurrent.filter(x=>x.status==='rejected').length,0);
+await removePendingBill(row.key,row.id);
+await removePendingBill(row.key,'request-2');
+const sale=id=>({...row,id,input:{clientInvoiceId:id,items:[{productId:'rice',quantity:0.75}]}});
+const stockRace=await Promise.allSettled([queueBill(sale('stock-1'),{rice:1}),queueBill(sale('stock-2'),{rice:1})]);
+assert.equal(stockRace.filter(x=>x.status==='fulfilled').length,1);
+assert.equal(stockRace.filter(x=>x.status==='rejected').length,1);
+assert.equal((await pendingBills(row.key)).length,1);
+await queueBill({...sale('other-account'),key:'user-b:shop-a'},{rice:1});
+assert.equal((await pendingBills('user-b:shop-a')).length,1);
 assert.equal(billingQuantity(0.5,10),0.5);
 assert.equal(billingQuantity(1,0.25),0.25);
 for(const value of [0,-1,NaN,Infinity])assert.equal(billingQuantity(value,10),null);
-console.log('Offline store tests passed: v1 upgrade, account scope, duplicate/conflict preservation, archive/restore, concurrent insertion and fractional quantities. Simulated IndexedDB; physical restart testing remains separate.');
+console.log(`Offline store tests passed: v${legacyVersion} upgrade, account scope, duplicate preservation, archive/restore, multiple bills, concurrent stock reservation and fractional quantities. Simulated IndexedDB; physical restart testing remains separate.`);
