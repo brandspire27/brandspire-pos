@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { getFirebaseAuth } from '@/lib/firebase';
+import { clearOfflineWorkspace } from '@/lib/offline-workspace';
 import { signOut } from 'firebase/auth';
 import { clearWorkspaceCache } from '@/lib/pos';
 import { posLanguageLabel, posText, type PosLanguage } from '@/lib/pos-i18n';
@@ -62,7 +63,7 @@ export default function OwnerShell({ businessName, language = 'en', children }: 
   ];
 
   async function logout(){
-    clearWorkspaceCache();
+    clearWorkspaceCache(); const uid=getFirebaseAuth().currentUser?.uid;if(uid)clearOfflineWorkspace(uid);
     await signOut(getFirebaseAuth());
     router.push('/auth/login');
   }

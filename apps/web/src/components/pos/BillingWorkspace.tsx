@@ -12,6 +12,7 @@ import { createInvoice, getBillingPolicy, listCustomers, listProducts } from '@/
 import { posText } from '@/lib/pos-i18n';
 import { getFirebaseAuth } from '@/lib/firebase';
 import { clearRecovery, readRecovery, recoveryKey, saveRecovery, type BillingRecovery } from '@/lib/billing-recovery';
+import { readOfflineWorkspace,saveOfflineWorkspace,clearOfflineWorkspace,prepareOfflineShell } from '@/lib/offline-workspace';
 import { pendingBills,queueBill } from '@/lib/offline-bill';
 import PendingOfflineBill from './PendingOfflineBill';
 import QuantityInput from './QuantityInput';
@@ -31,6 +32,11 @@ function mergeProducts(...lists:Product[][]){
 
 export default function BillingWorkspace({portal}:Props){
   const router=useRouter();
+  const [online,setOnline]=useState(true);
+  const [offlineLoaded,setOfflineLoaded]=useState(false);
+  const [offlineNotice,setOfflineNotice]=useState('');
+  const [preparingOffline,setPreparingOffline]=useState(false);
+  useEffect(()=>{const refresh=()=>setOnline(navigator.onLine);refresh();window.addEventListener('online',refresh);window.addEventListener('offline',refresh);return()=>{window.removeEventListener('online',refresh);window.removeEventListener('offline',refresh);};},[]);
   const[org,setOrg]=useState<CurrentOrganization|null>(null);
   const[products,setProducts]=useState<Product[]>([]);
   const[remoteProducts,setRemoteProducts]=useState<Product[]>([]);
@@ -46,6 +52,7 @@ export default function BillingWorkspace({portal}:Props){
   const[creating,setCreating]=useState(false);
   const pendingInvoice=useRef<{fingerprint:string;id:string}|null>(null);
   const submitting=useRef(false);
+  const workspaceUid=useRef<string|null>(null);
   const[catalogBusy,setCatalogBusy]=useState(false);
   const[error,setError]=useState('');
   const[success,setSuccess]=useState<{id:string;invoiceNumber:string;total:number}|null>(null);
@@ -76,6 +83,14 @@ export default function BillingWorkspace({portal}:Props){
   useEffect(()=>{
     async function load(){
       try {
+      const auth=getFirebaseAuth();await auth.authStateReady();workspaceUid.current=auth.currentUser?.uid??null;
+      if(!navigator.onLine){
+        const saved=auth.currentUser?readOfflineWorkspace(auth.currentUser.uid,portal):null;
+        if(!saved)throw new Error('Offline billing is not prepared, has expired, or belongs to another login. Connect to the internet and open billing first.');
+        setOrg(saved.organization);setProducts(saved.products as unknown as Product[]);setCustomers(saved.customers as unknown as Customer[]);setPolicy(saved.policy);setPaymentMethod('CASH');setOfflineLoaded(true);
+        setOfflineNotice(`Offline catalog: ${new Date(saved.savedAt).toLocaleString()}. Only saved products/customers are available.`);return;
+      }
+      if(auth.currentUser)clearOfflineWorkspace(auth.currentUser.uid);
       const current=await getCurrentOrganization();
       if(!current)return router.replace('/auth/login');
       const expected=portal==='owner'?'OWNER':'STAFF';
@@ -100,10 +115,26 @@ export default function BillingWorkspace({portal}:Props){
     load();
   },[portal,router]);
 
+  async function prepareOffline(){
+    setPreparingOffline(true);setOfflineNotice('');
+    try{
+      const current=await getCurrentOrganization();const uid=getFirebaseAuth().currentUser?.uid;
+      if(!current||!uid||current.organizationId!==org?.organizationId||current.role!==(portal==='owner'?'OWNER':'STAFF')||!isSubscriptionUsable(current.subscriptionStatus,current.endsAt))throw new Error('Reload and verify your shop access first.');
+      if(cart.length||recovery)throw new Error('Finish or restore the current draft before preparing offline billing.');
+      const [catalog,people,settings]=await Promise.all([listProducts('',true,500),listCustomers('',true,500),getBillingPolicy()]);
+      await prepareOfflineShell(portal);
+      if(getFirebaseAuth().currentUser?.uid!==uid)throw new Error('Login changed during preparation. Reload and retry.');
+      saveOfflineWorkspace({version:1,uid,portal,savedAt:Date.now(),organization:current,products:catalog.data,customers:people.data,policy:settings.data});
+      setProducts(catalog.data as unknown as Product[]);setCustomers(people.data as unknown as Customer[]);setPolicy(settings.data);
+      setOfflineNotice(`Offline reopening ready for up to 24 hours: ${catalog.data.length} products, ${people.data.length} customers saved. Bookmark this billing page. Refresh this copy after stock changes.`);
+    }catch(reason){setOfflineNotice(reason instanceof Error?reason.message:'Offline preparation failed.');}
+    finally{setPreparingOffline(false);}
+  }
+
   // Keep initial render light, but search the full tenant catalog when local results are not enough.
   useEffect(()=>{
     const text=query.trim();
-    if(!org||text.length<2){setRemoteProducts([]);setCatalogBusy(false);return;}
+    if(!org||!online||offlineLoaded||text.length<2){setRemoteProducts([]);setCatalogBusy(false);return;}
     let active=true;
     const timer=window.setTimeout(async()=>{
       setCatalogBusy(true);
@@ -118,7 +149,7 @@ export default function BillingWorkspace({portal}:Props){
       }
     },240);
     return()=>{active=false;window.clearTimeout(timer);};
-  },[query,org]);
+  },[query,org,online,offlineLoaded]);
 
   const filteredProducts=useMemo(()=>{
     const text=query.trim().toLowerCase();
@@ -168,7 +199,7 @@ export default function BillingWorkspace({portal}:Props){
     const exact=mergeProducts(products,remoteProducts).find(p=>String(p.barcode??'').toLowerCase()===lowered||String(p.sku??'').toLowerCase()===lowered);
     if(exact){addProduct(exact);return;}
     if(filteredProducts.length===1){addProduct(filteredProducts[0]);return;}
-    if(!org)return;
+    if(!org||!online||offlineLoaded){setError('This product is not in the saved offline catalog.');return;}
     setCatalogBusy(true);
     try {
       const result=await listProducts(raw,true,30);
@@ -190,6 +221,7 @@ export default function BillingWorkspace({portal}:Props){
     setCreating(true);setError('');setSuccess(null);
     const paid=amountPaid===''?null:Number(amountPaid);
     try {
+      if(!workspaceUid.current||getFirebaseAuth().currentUser?.uid!==workspaceUid.current)throw new Error('Your login changed. Reload before billing.');
       const input={
         customerId:customerId||null,
         items:items.map(item=>({productId:item.id,quantity:item.quantity})),
@@ -203,7 +235,10 @@ export default function BillingWorkspace({portal}:Props){
       if(!recoveryStorageKey.current)throw new Error('Device recovery is not ready. Please reload and sign in again.');
       saveRecovery(recoveryStorageKey.current,{...snapshot(),cart:items,pendingInvoice:pendingInvoice.current});
       const offlineKey=recoveryStorageKey.current;
-      if(!navigator.onLine){
+      if(!navigator.onLine||offlineLoaded){
+        if(!isSubscriptionUsable(org.subscriptionStatus,org.endsAt))throw new Error('Subscription expired. Reconnect to verify access.');
+        const uid=getFirebaseAuth().currentUser?.uid;
+        if(offlineLoaded&&(!uid||!readOfflineWorkspace(uid,portal)))throw new Error('Offline access expired. Connect and reload before another sale.');
         if(!['CASH','CREDIT'].includes(paymentMethod))throw new Error('Offline saving supports cash or credit only. Online payments need a connection.');
         if(items.some(item=>item.quantity>Number(item.stock)))throw new Error('Insufficient cached stock.');
         await queueBill({key:offlineKey,id:pendingInvoice.current.id,createdAt:Date.now(),lines:items.map(item=>({name:item.name,quantity:item.quantity})),input:{...input,clientInvoiceId:pendingInvoice.current.id,items:items.map(item=>({productId:item.id,quantity:item.quantity,expectedPrice:Number(item.selling_price),expectedTax:Number(item.tax_rate),expectedInclusive:item.tax_inclusive}))}},Object.fromEntries(items.map(item=>[item.id,Number(item.stock)])));
@@ -212,6 +247,7 @@ export default function BillingWorkspace({portal}:Props){
         return;
       }
       if((await pendingBills(offlineKey)).length)throw new Error('Sync pending device bills before creating an online bill so stock stays correct.');
+      const uid=getFirebaseAuth().currentUser?.uid;if(uid)clearOfflineWorkspace(uid);
       const response=await createInvoice({...input,clientInvoiceId:pendingInvoice.current.id});
       try{clearRecovery(recoveryStorageKey.current);}catch{setStorageError('Bill saved, but the local recovery copy could not be cleared. Retry will use the same invoice ID.');}
       pendingInvoice.current=null;
@@ -238,12 +274,13 @@ export default function BillingWorkspace({portal}:Props){
   const searchStatus=org.preferredLanguage==='hi'?'पूरे कैटलॉग में खोज रहे हैं…':org.preferredLanguage==='hinglish'?'Poore catalog mein search ho raha hai…':'Searching the full catalog…';
 
   return <Shell businessName={org.organizationName} language={org.preferredLanguage}>
-    <PendingOfflineBill organizationId={org.organizationId} onSynced={()=>{setError('Bill synced. Reload the catalog before the next sale.');void listProducts('',true,250).then(result=>setProducts(result.data as unknown as Product[])).catch(()=>setError('Bill synced, but catalog refresh failed. Reload before another sale.'));}} />
+    <section className="card"><h2>{online?'Offline billing तैयार करें':'इंटरनेट बंद है / Offline'}</h2>{online&&!offlineLoaded&&<button className="btn" disabled={preparingOffline||creating} onClick={prepareOffline}>{preparingOffline?'तैयार हो रहा है…':'इस डिवाइस पर Offline तैयार करें'}</button>}{offlineLoaded&&online&&<button className="btn" onClick={()=>window.location.reload()}>Internet वापस आया — Reload करें</button>}{offlineNotice&&<p role="status">{offlineNotice}</p>}{!online&&<p>Cash/credit bills stay pending on this device. AI and new products need internet.</p>}</section>
+    <PendingOfflineBill organizationId={org.organizationId} onSynced={()=>{const uid=getFirebaseAuth().currentUser?.uid;if(uid)clearOfflineWorkspace(uid);setError('Bill synced. Reload the catalog before the next sale.');void listProducts('',true,250).then(result=>setProducts(result.data as unknown as Product[])).catch(()=>setError('Bill synced, but catalog refresh failed. Reload before another sale.'));}} />
     {storageError&&<p className="form-error" role="alert">{storageError}</p>}
     {recovery&&<section className="card"><h2>पिछला अधूरा बिल मिला / Saved draft found</h2><p>{recovery.cart.length} items · {new Date(recovery.savedAt).toLocaleString()}. This is a recovery copy, not proof of a completed invoice. Restore it to safely retry.</p><button className="btn btn-primary" onClick={restoreDraft}>अधूरा बिल खोलें / Restore draft</button></section>}
     {recoveryReady&&cart.length>0&&!storageError&&<p role="status">ड्राफ्ट इस डिवाइस पर सुरक्षित है। Bill is final only after server confirmation.</p>}
-    <BillingQuickAdd hindi={org.preferredLanguage!=='en'} disabled={creating} onCustomer={customer=>{setCustomers(current=>[customer,...current]);setCustomerId(customer.id);}} onProduct={product=>{setProducts(current=>mergeProducts(current,[product]));addProduct(product);}}/>
-    <PosAssist mode="bill" confirmLabel="Confirm & save bill" reviewContext={`Adds to current cart (${cart.length} lines). Customer: ${customers.find(c=>c.id===customerId)?.name??'Walk-in'}. Payment: ${paymentMethod}. Paid: ${amountPaid || (paymentMethod==='CREDIT'?'0':'full')}. Discount: ${effectiveDiscount}${effectiveType==='PERCENT'?'%':' INR'}. Change these below before confirming.`} onConfirm={async draft=>{
+    {online&&!offlineLoaded&&<BillingQuickAdd hindi={org.preferredLanguage!=='en'} disabled={creating} onCustomer={customer=>{setCustomers(current=>[customer,...current]);setCustomerId(customer.id);}} onProduct={product=>{setProducts(current=>mergeProducts(current,[product]));addProduct(product);}}/>}
+    {online&&!offlineLoaded&&<PosAssist mode="bill" confirmLabel="Confirm & save bill" reviewContext={`Adds to current cart (${cart.length} lines). Customer: ${customers.find(c=>c.id===customerId)?.name??'Walk-in'}. Payment: ${paymentMethod}. Paid: ${amountPaid || (paymentMethod==='CREDIT'?'0':'full')}. Discount: ${effectiveDiscount}${effectiveType==='PERCENT'?'%':' INR'}. Change these below before confirming.`} onConfirm={async draft=>{
       const next=cart.map(item=>({...item}));
       for(const item of draft.items as {product:Product;quantity:number}[]){
         const index=next.findIndex(row=>row.id===item.product.id);
@@ -265,7 +302,7 @@ export default function BillingWorkspace({portal}:Props){
       }
       setCart(next);
       setSuccess(null);setError('');
-    }}/>
+    }}/>}
     <div className="content-head pos-page-head"><div><span className="page-kicker">{portal==='staff'?t.counterKickerStaff:t.counterKickerOwner}</span><h1>{portal==='staff'?t.counterStaffTitle:t.counterOwnerTitle}</h1><p>{t.counterSub}</p></div><div className="counter-shortcut" aria-hidden="true">↵ <span>{t.searchFocused}</span></div></div>
     {error&&<div className="form-error" role="alert">{error}</div>}
     {success&&<div className="bill-success" role="status"><div><span>{t.billCreated}</span><h2>{success.invoiceNumber}</h2><p>{formatINR(success.total)} · {t.stockUpdated}</p></div><div className="hero-actions" style={{marginTop:0}}>{success.id&&<button className="btn btn-primary" onClick={()=>router.push(`${base}/invoices/${success.id}`)}>{t.viewPrint}</button>}<button className="btn" onClick={()=>setSuccess(null)}>{t.newBill}</button></div></div>}
