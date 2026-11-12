@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import {mergeVoiceBill,voiceBillReview} from '../src/lib/voice-bill-review.ts';
+const rice={id:'rice',name:'Rice',selling_price:100,tax_rate:5,tax_inclusive:false,stock:10,unit:'kg'};
+const milk={id:'milk',name:'Milk',selling_price:112,tax_rate:12,tax_inclusive:true,stock:10,unit:'bottle'};
+const context={customer:'Walk-in',customerId:'',payment:'CASH',paid:'',discountType:'PERCENT',discount:10};
+const lines=mergeVoiceBill([{...rice,quantity:0.5}],{items:[{product:rice,quantity:0.5},{product:milk,quantity:1}]});
+assert.equal(lines.length,2);assert.equal(lines[0].quantity,1);
+const review=voiceBillReview(lines,context,false);assert.equal(review.total,195.3);assert.match(review.text,/Paid 195.30/);assert.match(review.text,/Due 0.00/);
+const credit=voiceBillReview(lines,{...context,payment:'CREDIT'},true);assert.match(credit.text,/बाकी 195.30/);assert.notEqual(review.signature,credit.signature);
+assert.notEqual(review.signature,voiceBillReview(lines,{...context,customerId:'different-same-name'},false).signature);
+assert.match(voiceBillReview(lines,{...context,paid:'100'},false).text,/Due 95.30/);
+assert.throws(()=>voiceBillReview(lines,{...context,paid:'196'},false));
+assert.throws(()=>voiceBillReview(lines,{...context,discount:NaN},false));
+for(const quantity of [0,-1,NaN,Infinity,11])assert.throws(()=>mergeVoiceBill([],{items:[{product:rice,quantity}]}));
+assert.throws(()=>mergeVoiceBill([],{items:[]}));assert.throws(()=>mergeVoiceBill([],{items:[{quantity:1}]}));
+assert.throws(()=>mergeVoiceBill([],{items:[{product:{...rice,selling_price:-1},quantity:1}]}));
+console.log('Voice bill review tests passed: merged cart, fractional quantity, inclusive/exclusive tax, discount, partial payment/credit, changed context signatures and invalid draft rejection.');

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { authenticatedApiRequest } from '@/lib/firebase';
 
 type Speech = { lang: string; onresult: ((e: { results: { transcript: string }[][] }) => void) | null; onerror: (() => void) | null; onend: (() => void) | null; start(): void; abort(): void };
-export default function PosAssist({ mode, onDraft, onConfirm, confirmLabel, reviewContext }: { mode: 'product' | 'bill'; onDraft: (value: Record<string, unknown>) => void; onConfirm?: (value: Record<string, unknown>) => Promise<void>; confirmLabel?: string; reviewContext?: string }) {
+export default function PosAssist({ mode, onDraft, onConfirm, confirmLabel, reviewContext, getBillReview }: { mode: 'product' | 'bill'; onDraft: (value: Record<string, unknown>) => void; onConfirm?: (value: Record<string, unknown>) => Promise<void>; confirmLabel?: string; reviewContext?: string; getBillReview?: (value:Record<string,unknown>,hindi:boolean)=>{text:string;signature:string;total:number} }) {
   const [text, setText] = useState('');
   const [image, setImage] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -17,6 +17,10 @@ export default function PosAssist({ mode, onDraft, onConfirm, confirmLabel, revi
   const photoInput = useRef<HTMLInputElement | null>(null);
   const speech = useRef<Speech | null>(null);
   const hindi = language === 'hi-IN';
+  const reviewFn=useRef(getBillReview);reviewFn.current=getBillReview;
+  const reviewed=useRef('');
+  let billReview:{text:string;signature:string;total:number}|undefined;let reviewError='';
+  if(preview&&mode==='bill'&&getBillReview){try{billReview=getBillReview(preview,hindi);}catch(e){reviewError=e instanceof Error?e.message:'Please check the bill.';}}
   const [audioHelp, setAudioHelp] = useState(true);
   const [online, setOnline] = useState(true);
   function say(message: string) {
@@ -27,10 +31,11 @@ export default function PosAssist({ mode, onDraft, onConfirm, confirmLabel, revi
     window.speechSynthesis.speak(utterance);
   }
   function readPreview(value: Record<string, unknown>) {
+    if(mode==='bill'&&reviewFn.current){const review=reviewFn.current(value,hindi);reviewed.current=review.signature;say(`${review.text} ${hindi?'सही है तो बिल सेव करें दबाएं।':'If correct, press Save bill.'}`);return;}
     const summary = mode === 'product'
       ? `${value.name}. ${hindi ? 'प्रति यूनिट कीमत' : 'Price per unit'} ${value.selling_price ?? (hindi ? 'नहीं मिली' : 'missing')}. ${hindi ? 'स्टॉक' : 'Stock'} ${value.stock ?? 0}. ${hindi ? 'टैक्स प्रतिशत' : 'Tax percent'} ${value.tax_rate ?? 0}.`
       : (value.items as {product:{name:string};quantity:number}[]).map(item=>`${item.product.name}, ${item.quantity}`).join('. ');
-    say(`${summary} ${hindi ? 'सही है तो हरे बटन से सेव करें। गलत है तो सुधारें।' : 'Check the details, then confirm to save.'}`);
+    say(`${summary} ${hindi ? 'सही है तो सेव करें दबाएं। गलत है तो सुधारें।' : 'Check the details, then confirm to save.'}`);
   }
   useEffect(() => {
     const update = () => setOnline(navigator.onLine);
@@ -39,6 +44,7 @@ export default function PosAssist({ mode, onDraft, onConfirm, confirmLabel, revi
   }, []);
   function listen() {
     window.speechSynthesis?.cancel();
+    pending.current=null;setPreview(null);reviewed.current='';
     const browser = window as unknown as { SpeechRecognition?: new () => Speech; webkitSpeechRecognition?: new () => Speech };
     const Constructor = browser.SpeechRecognition ?? browser.webkitSpeechRecognition;
     if (!Constructor) { setError('Voice is unavailable in this browser. Type instructions or choose a photo.'); return; }
@@ -65,6 +71,7 @@ export default function PosAssist({ mode, onDraft, onConfirm, confirmLabel, revi
     if (!pending.current || !onConfirm || inFlight.current) return;
     inFlight.current = true; setBusy(true); setError('');
     try {
+      if(mode==='bill'&&reviewFn.current){const review=reviewFn.current(pending.current,hindi);if(review.signature!==reviewed.current){readPreview(pending.current);setError(hindi?'बिल बदला है। नई रकम सुनकर फिर सेव करें दबाएं।':'Bill changed. Review the updated total, then press Save again.');return;}}
       await onConfirm(pending.current);
       pending.current = null; setPreview(null); setText(''); setImage(undefined);
       if (photoInput.current) photoInput.current.value = '';
@@ -113,7 +120,7 @@ export default function PosAssist({ mode, onDraft, onConfirm, confirmLabel, revi
     {saved && <p role="status">{saved}</p>}
     {preview && <div aria-label="Review draft" aria-live="polite">
       <h3>{hindi ? 'क्या यह सही है?' : 'Is this correct?'}</h3>
-      <button type="button" className="btn" onClick={()=>readPreview(preview)}>{hindi ? '🔊 फिर सुनें' : 'Listen again'}</button>
+      <button type="button" className="btn" disabled={!!reviewError||busy||listening} onClick={()=>{try{readPreview(preview);}catch(e){setError(e instanceof Error?e.message:'Please check details.');}}}>{hindi ? '🔊 फिर सुनें' : 'Listen again'}</button>
       {mode === 'product' ? <p>{String(preview.name)} · {preview.selling_price == null ? 'Price missing — enter manually' : `₹${Number(preview.selling_price).toFixed(2)}`}</p>
         : <ul>{(preview.items as { product: { id: string; name: string; selling_price: number }; quantity: number }[]).map(item => <li key={item.product.id}>{item.product.name} × {item.quantity} · ₹{Number(item.product.selling_price).toFixed(2)} each</li>)}</ul>}
       {mode === 'product' && onConfirm && <fieldset disabled={busy} style={{border:0,padding:0}}>
@@ -124,10 +131,11 @@ export default function PosAssist({ mode, onDraft, onConfirm, confirmLabel, revi
         <label>GST %<input className="input" type="number" min="0" max="100" value={Number(preview.tax_rate ?? 0)} onChange={e=>editPreview('tax_rate',Number(e.target.value))} /></label>
         <label><input type="checkbox" checked={Boolean(preview.tax_inclusive)} onChange={e=>editPreview('tax_inclusive',e.target.checked)} />Price includes GST</label>
       </fieldset>}
+      {billReview&&<div className="card"><strong>{hindi?'कुल':'Total'} ₹{billReview.total.toFixed(2)}</strong><p>{billReview.text}</p></div>}{reviewError&&<p role="alert" className="form-error">{reviewError}</p>}
       <p>{reviewContext || 'Check the price per unit, stock and tax before saving.'}</p>
-      {onConfirm && <button type="button" className="btn btn-primary voice-counter-save" disabled={busy || listening || !online || (mode==='product' && (preview.selling_price == null || !String(preview.name??'').trim()))} onClick={confirm}>{busy ? (hindi ? 'सेव हो रहा है…' : 'Saving…') : hindi ? (mode==='product' ? '✓ सही है, माल सेव करें' : '✓ सही है, बिल सेव करें') : confirmLabel ?? 'Confirm & save product'}</button>}
+      {onConfirm && <button type="button" className="btn btn-primary voice-counter-save" disabled={busy || listening || !online || !!reviewError || (mode==='product' && (preview.selling_price == null || !String(preview.name??'').trim()))} onClick={confirm}>{busy ? (hindi ? 'सेव हो रहा है…' : 'Saving…') : hindi ? (mode==='product' ? '✓ सही है, माल सेव करें' : '✓ सही है, बिल सेव करें') : confirmLabel ?? 'Confirm & save product'}</button>}
       <button type="button" className="btn" disabled={busy || listening} onClick={applyDraft}>{hindi ? '✎ सुधारें' : 'Edit details'}</button>
-      <button type="button" className="btn" disabled={busy} onClick={() => { pending.current = null; setPreview(null); }}>Discard draft</button>
+      <button type="button" className="btn" disabled={busy} onClick={() => { pending.current = null; setPreview(null); }}>{hindi?'रद्द करें':'Discard draft'}</button>
     </div>}
     {busy && <p role="status">{hindi ? 'थोड़ा रुकिए…' : 'Please wait…'}</p>}
   </section>;

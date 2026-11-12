@@ -15,6 +15,7 @@ import { clearRecovery, readRecovery, recoveryKey, saveRecovery, type BillingRec
 import { readOfflineWorkspace,saveOfflineWorkspace,clearOfflineWorkspace,prepareOfflineShell } from '@/lib/offline-workspace';
 import { pendingBills,queueBill } from '@/lib/offline-bill';
 import PendingOfflineBill from './PendingOfflineBill';
+import { mergeVoiceBill,voiceBillReview } from '@/lib/voice-bill-review';
 import QuantityInput from './QuantityInput';
 import { billingQuantity } from '@/lib/billing-quantity';
 
@@ -224,7 +225,7 @@ export default function BillingWorkspace({portal}:Props){
       if(!workspaceUid.current||getFirebaseAuth().currentUser?.uid!==workspaceUid.current)throw new Error('Your login changed. Reload before billing.');
       const input={
         customerId:customerId||null,
-        items:items.map(item=>({productId:item.id,quantity:item.quantity})),
+        items:items.map(item=>({productId:item.id,quantity:item.quantity,expectedPrice:Number(item.selling_price),expectedTax:Number(item.tax_rate),expectedInclusive:Boolean(item.tax_inclusive)})),
         discountType:effectiveType,
         discountValue:effectiveDiscount,
         paymentMethod,
@@ -280,26 +281,12 @@ export default function BillingWorkspace({portal}:Props){
     {recovery&&<section className="card"><h2>पिछला अधूरा बिल मिला / Saved draft found</h2><p>{recovery.cart.length} items · {new Date(recovery.savedAt).toLocaleString()}. This is a recovery copy, not proof of a completed invoice. Restore it to safely retry.</p><button className="btn btn-primary" onClick={restoreDraft}>अधूरा बिल खोलें / Restore draft</button></section>}
     {recoveryReady&&cart.length>0&&!storageError&&<p role="status">ड्राफ्ट इस डिवाइस पर सुरक्षित है। Bill is final only after server confirmation.</p>}
     {online&&!offlineLoaded&&<BillingQuickAdd hindi={org.preferredLanguage!=='en'} disabled={creating} onCustomer={customer=>{setCustomers(current=>[customer,...current]);setCustomerId(customer.id);}} onProduct={product=>{setProducts(current=>mergeProducts(current,[product]));addProduct(product);}}/>}
-    {online&&!offlineLoaded&&<PosAssist mode="bill" confirmLabel="Confirm & save bill" reviewContext={`Adds to current cart (${cart.length} lines). Customer: ${customers.find(c=>c.id===customerId)?.name??'Walk-in'}. Payment: ${paymentMethod}. Paid: ${amountPaid || (paymentMethod==='CREDIT'?'0':'full')}. Discount: ${effectiveDiscount}${effectiveType==='PERCENT'?'%':' INR'}. Change these below before confirming.`} onConfirm={async draft=>{
-      const next=cart.map(item=>({...item}));
-      for(const item of draft.items as {product:Product;quantity:number}[]){
-        const index=next.findIndex(row=>row.id===item.product.id);
-        const quantity=item.quantity+(index<0?0:next[index].quantity);
-        if(quantity>Number(item.product.stock))throw new Error(`Insufficient stock for ${item.product.name}.`);
-        const row={...item.product,quantity};if(index<0)next.push(row);else next[index]=row;
-      }
+    {online&&!offlineLoaded&&<PosAssist mode="bill" getBillReview={(draft,hindi)=>voiceBillReview(mergeVoiceBill(cart,draft),{customer:customers.find(c=>c.id===customerId)?.name??(hindi?'बिना नाम के ग्राहक':'Walk-in'),customerId,payment:paymentMethod,paid:amountPaid,discountType:effectiveType,discount:effectiveDiscount},hindi)} confirmLabel="Confirm & save bill" reviewContext={`Adds to current cart (${cart.length} lines). Customer: ${customers.find(c=>c.id===customerId)?.name??'Walk-in'}. Payment: ${paymentMethod}. Paid: ${amountPaid || (paymentMethod==='CREDIT'?'0':'full')}. Discount: ${effectiveDiscount}${effectiveType==='PERCENT'?'%':' INR'}. Change these below before confirming.`} onConfirm={async draft=>{
+      const next=mergeVoiceBill(cart,draft);
       await createBill(next,true);
     }} onDraft={draft=>{
       if(creating)throw new Error('Wait for the current bill to finish saving.');
-      const items=draft.items as {product:Product;quantity:number}[];
-      const next=[...cart];
-      for(const item of items){
-        const index=next.findIndex(row=>row.id===item.product.id);
-        const quantity=item.quantity+(index<0?0:next[index].quantity);
-        if(quantity>Number(item.product.stock))throw new Error(`Insufficient stock for ${item.product.name}. Review the current cart first.`);
-        const row={...item.product,quantity};
-        if(index<0)next.push(row);else next[index]=row;
-      }
+      const next=mergeVoiceBill(cart,draft);
       setCart(next);
       setSuccess(null);setError('');
     }}/>}
