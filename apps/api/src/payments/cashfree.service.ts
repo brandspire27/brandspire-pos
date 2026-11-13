@@ -71,10 +71,11 @@ export class CashfreeService {
       : 'https://sandbox.cashfree.com/pg';
   }
 
-  private async request<T>(path: string, init?: RequestInit): Promise<T> {
+  async request<T>(path: string, init?: RequestInit): Promise<T> {
     const { clientId, clientSecret } = this.getCredentials();
     const response = await fetch(`${this.baseUrl()}${path}`, {
       ...init,
+      signal: AbortSignal.timeout(15000),
       headers: {
         accept: 'application/json',
         'content-type': 'application/json',

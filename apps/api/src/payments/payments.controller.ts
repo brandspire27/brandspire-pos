@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'crypto';
+import { randomUUID } from 'crypto';
 import { BadRequestException, Body, Controller, Get, Headers, Param, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { z } from 'zod';
@@ -6,27 +6,29 @@ import { TursoService } from '../database/turso.service';
 import { OwnerAuthGuard } from '../owner/owner-auth.guard';
 import { AdminAuthGuard } from '../admin/admin-auth.guard';
 import { CashfreeService } from './cashfree.service';
+import { CashfreeOrdersService } from './cashfree-orders.service';
 
 type OwnerRequest = { ownerUserId?: string; organizationId?: string; ownerEmail?: string };
 type AdminRequest = { adminUserId?: string; adminEmail?: string };
 type RawRequest = { rawBody?: Buffer };
 
 const checkoutSchema = z.object({ planId: z.string().uuid(), billingCycle: z.enum(['MONTHLY','YEARLY']) });
-const verifySchema = z.object({ subscriptionId: z.string().min(4) });
+const verifySchema = z.object({ orderId: z.string().regex(/^bsp_[a-f0-9]{32}$/) });
 const cancelSchema = z.object({ cancelAtPeriodEnd: z.boolean().default(true) });
 const syncPlanSchema = z.object({ billingCycle: z.enum(['MONTHLY','YEARLY']) });
 
 @Controller('owner/subscription')
 @UseGuards(OwnerAuthGuard)
 export class OwnerSubscriptionController {
-  constructor(private readonly database: TursoService, private readonly cashfree: CashfreeService) {}
+  constructor(private readonly database: TursoService, private readonly cashfree: CashfreeService, private readonly orders: CashfreeOrdersService) {}
 
   @Get('overview')
   async overview(@Req() request: OwnerRequest) {
-    const [subscriptionResult, planResult, transactionResult] = await Promise.all([
+    const [subscriptionResult, planResult, transactionResult, pendingResult] = await Promise.all([
       this.database.execute(`SELECT id, plan_id, status, starts_at, ends_at, grace_ends_at, admin_message, provider, provider_subscription_id, provider_status, billing_cycle, cancel_at_period_end, last_payment_at, next_charge_at, created_at FROM subscriptions WHERE organization_id = ? ORDER BY created_at DESC LIMIT 5`, [request.organizationId!]),
       this.database.execute(`SELECT id, code, name, monthly_price, yearly_price, currency, minimum_months, features, provider_monthly_plan_id, provider_yearly_plan_id FROM plans WHERE active = 1 ORDER BY monthly_price`),
-      this.database.execute(`SELECT id, amount, currency, status, method, provider_payment_id, created_at, captured_at FROM payment_transactions WHERE organization_id = ? ORDER BY created_at DESC LIMIT 20`, [request.organizationId!])
+      this.database.execute(`SELECT id, amount, currency, status, method, provider_payment_id, created_at, captured_at FROM payment_transactions WHERE organization_id = ? ORDER BY created_at DESC LIMIT 20`, [request.organizationId!]),
+      this.database.execute(`SELECT provider_order_id AS order_id, amount, currency, created_at FROM subscription_checkout_sessions WHERE organization_id=? AND created_by=? AND provider='CASHFREE_PG' AND status != 'ACTIVATED' ORDER BY created_at DESC LIMIT 5`, [request.organizationId!,request.ownerUserId!])
     ]);
     const subscriptions = subscriptionResult.rows;
     const plans = planResult.rows.map((row) => {
@@ -41,7 +43,8 @@ export class OwnerSubscriptionController {
         current: subscriptions[0] ?? null,
         history: subscriptions,
         plans,
-        transactions: transactionResult.rows
+        transactions: transactionResult.rows,
+        pendingOrders: pendingResult.rows
       }
     };
   }
@@ -50,7 +53,7 @@ export class OwnerSubscriptionController {
   async checkout(@Req() request: OwnerRequest, @Body() body: unknown) {
     const parsed = checkoutSchema.safeParse(body);
     if (!parsed.success) throw new BadRequestException(parsed.error.issues[0]?.message ?? 'Invalid subscription choice');
-    const data = await this.cashfree.createCheckoutSession(
+    const data = await this.orders.checkout(
       request.organizationId!,
       request.ownerUserId!,
       request.ownerEmail ?? '',
@@ -66,10 +69,10 @@ export class OwnerSubscriptionController {
     if (!parsed.success) throw new BadRequestException('Invalid Cashfree verification payload');
     return {
       success: true,
-      data: await this.cashfree.verifyCheckout(
+      data: await this.orders.verify(
         request.organizationId!,
         request.ownerUserId!,
-        parsed.data.subscriptionId
+        parsed.data.orderId
       )
     };
   }
@@ -179,14 +182,13 @@ export class AdminBillingController {
 
 @Controller('payments/cashfree')
 export class CashfreeWebhookController {
-  constructor(private readonly cashfree: CashfreeService) {}
+  constructor(private readonly cashfree: CashfreeService, private readonly orders: CashfreeOrdersService) {}
 
   @Post('webhook')
   async webhook(
     @Req() request: RawRequest,
     @Headers('x-webhook-signature') signature = '',
-    @Headers('x-webhook-timestamp') timestamp = '',
-    @Headers('x-webhook-id') webhookId = ''
+    @Headers('x-webhook-timestamp') timestamp = ''
   ) {
     const rawBody = request.rawBody;
     if (!rawBody?.length) throw new BadRequestException('Raw Cashfree webhook body is required');
@@ -194,8 +196,7 @@ export class CashfreeWebhookController {
       throw new BadRequestException('Invalid Cashfree webhook signature');
     }
 
-    const eventId = webhookId || createFallbackEventId(rawBody, timestamp);
-    return { success: true, ...(await this.cashfree.processWebhook(eventId, rawBody)) };
+    return { success: true, ...(await this.orders.webhook(rawBody)) };
   }
 
   @Get('return')
@@ -208,8 +209,4 @@ export class CashfreeWebhookController {
     const subscriptionId = String(body?.subscription_id ?? body?.cf_subscription_id ?? '').trim() || undefined;
     return response.redirect(await this.cashfree.getReturnRedirect(subscriptionId));
   }
-}
-
-function createFallbackEventId(rawBody: Buffer, timestamp: string) {
-  return createHash('sha256').update(`${timestamp}:${rawBody.toString('utf8')}`).digest('hex');
 }
