@@ -105,7 +105,7 @@ export default function SubscriptionPage() {
         <div><small>Renewal</small><strong>Manual · No AutoPay</strong></div>
       </div>
       {current?.provider === 'CASHFREE' && current?.provider_subscription_id && !current.cancel_at_period_end && ['ACTIVE','TRIAL'].includes(current.status) && <button className="btn btn-secondary" disabled={working==='cancel'} onClick={cancel}>{t.cancel}</button>}
-      {current?.cancel_at_period_end&&<div className="soft-note">Automatic renewal is scheduled to stop at the end of the current billing cycle.</div>}
+      {!!current?.cancel_at_period_end&&<div className="soft-note">Automatic renewal is scheduled to stop at the end of the current billing cycle.</div>}
     </section>
 
     {overview?.mode === 'sandbox' && <div className="soft-note top-gap">Test mode: no real payment is collected.</div>}
@@ -113,7 +113,7 @@ export default function SubscriptionPage() {
     {!overview?.configured&&<div className="soft-note top-gap">{t.notConfigured}</div>}
 
     <section className="card pos-panel top-gap"><div className="panel-head"><div><span className="page-kicker">{t.planOptions}</span><h2>Brandspire POS</h2></div></div>
-      <div className="subscription-plan-grid">{(overview?.plans??[]).map(plan=><article className="subscription-plan" key={plan.id}><div><span className="page-kicker">{plan.code}</span><h3>{plan.name}</h3></div><div className="plan-price-row"><div><small>{t.monthly}</small><strong>{formatINR(plan.monthly_price)}</strong><button className="btn btn-primary" disabled={!overview?.configured||working!==''} onClick={()=>start(plan.id,'MONTHLY')}>{working===`${plan.id}-MONTHLY`?'…':t.start}</button></div><div><small>{t.yearly} · {t.saveYearly}</small><strong>{formatINR(plan.yearly_price)}</strong><button className="btn btn-secondary" disabled={!overview?.configured||working!==''} onClick={()=>start(plan.id,'YEARLY')}>{working===`${plan.id}-YEARLY`?'…':t.start}</button></div></div></article>)}</div>
+      {overview && overview.plans.length===0 && <div className="soft-note">Subscription plans abhi publish nahi hue hain. Price set hone ke baad Pay now yahan dikhega.</div>}<div className="subscription-plan-grid">{(overview?.plans??[]).map(plan=><article className="subscription-plan" key={plan.id}><div><span className="page-kicker">{plan.code}</span><h3>{plan.name}</h3></div><div className="plan-price-row"><div><small>{t.monthly}</small><strong>{formatINR(plan.monthly_price)}</strong><button className="btn btn-primary" disabled={!overview?.configured||working!==''} onClick={()=>start(plan.id,'MONTHLY')}>{working===`${plan.id}-MONTHLY`?'…':t.start}</button></div><div><small>{t.yearly} · {t.saveYearly}</small><strong>{formatINR(plan.yearly_price)}</strong><button className="btn btn-secondary" disabled={!overview?.configured||working!==''} onClick={()=>start(plan.id,'YEARLY')}>{working===`${plan.id}-YEARLY`?'…':t.start}</button></div></div></article>)}</div>
     </section>
 
     {(overview?.pendingOrders??[]).length>0 && <section className="card pos-panel top-gap"><h2>Recent checkouts</h2><p>Payment kar diya? Dobara pay karne se pehle status check karein.</p>{overview?.pendingOrders.map(order=><div className="compact-row" key={order.order_id}><span>{formatINR(order.amount)} · {formatDateTime(order.created_at)}</span><button className="btn btn-secondary" disabled={working!==''} onClick={()=>void checkOrder(order.order_id)}>Check payment</button></div>)}</section>}

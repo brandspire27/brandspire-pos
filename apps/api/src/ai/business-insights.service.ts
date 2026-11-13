@@ -2,6 +2,8 @@ import { BadGatewayException, BadRequestException, Injectable } from '@nestjs/co
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { TursoService } from '../database/turso.service';
+import { assistConfig } from '../pos/assist-config';
+import { AiProviderException } from '../common/filters/ai-provider.exception';
 
 const querySchema = z.object({ query: z.string().trim().min(2).max(500) });
 
@@ -74,14 +76,11 @@ export class BusinessInsightsService {
   async ask(organizationId: string, userId: string, input: unknown) {
     const parsed = querySchema.safeParse(input);
     if (!parsed.success) throw new BadRequestException(parsed.error.issues[0]?.message ?? 'Invalid question');
-    const provider = (process.env.AI_PROVIDER ?? '').trim();
-    const key = (process.env.AI_PROVIDER_KEY ?? '').trim();
-    const baseUrl = (process.env.AI_PROVIDER_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/$/, '');
-    const model = (process.env.AI_PROVIDER_MODEL ?? '').trim();
-    if (!provider || !key || !model) {
+    const {key, baseUrl, model, missing} = assistConfig();
+    const provider = baseUrl.includes('api.groq.com') ? 'groq' : 'openai-compatible';
+    if (missing.length) {
       return { configured: false, answer: null, message: 'Online AI provider is not configured. Offline Brandspire Assist remains available.' };
     }
-    if (provider !== 'openai-compatible') throw new BadRequestException('Unsupported AI_PROVIDER. Use openai-compatible for Phase 8.');
 
     const data = await this.snapshot(organizationId);
     const system = [
@@ -96,6 +95,7 @@ export class BusinessInsightsService {
     try {
       const response = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
+        signal: AbortSignal.timeout(30000),
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
         body: JSON.stringify({
           model,
@@ -109,20 +109,20 @@ export class BusinessInsightsService {
       });
       if (!response.ok) {
         errorCode = `HTTP_${response.status}`;
-        throw new BadGatewayException('AI provider request failed');
+        throw new AiProviderException(response.status === 429 ? 'AI is busy or its usage limit was reached. Try again later or use offline help.' : 'Online AI could not respond. Try again or use offline help.');
       }
       const json = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
       const answer = json.choices?.[0]?.message?.content?.trim();
       if (!answer) {
         errorCode = 'EMPTY_RESPONSE';
-        throw new BadGatewayException('AI provider returned an empty response');
+        throw new AiProviderException('AI returned no answer. Please try again.');
       }
       await this.writeUsage(organizationId, userId, provider, model, parsed.data.query.length, true);
       return { configured: true, answer, snapshotPeriodDays: data.periodDays };
     } catch (error) {
       await this.writeUsage(organizationId, userId, provider, model, parsed.data.query.length, false, errorCode ?? 'PROVIDER_ERROR');
-      if (error instanceof BadGatewayException) throw error;
-      throw new BadGatewayException(error instanceof Error ? error.message : 'AI provider request failed');
+      if (error instanceof AiProviderException) throw error;
+      throw new AiProviderException('Online AI timed out or could not connect. Try again or use offline help.');
     }
   }
 

@@ -102,7 +102,7 @@ export default function BrandspireAssist({ language, role }: Props) {
   const p8 = phase8Text(language);
   const available = useMemo(() => helpItems.filter((item) => role === 'OWNER' || !item.ownerOnly), [role]);
   const [open,setOpen]=useState(false);
-  const [mode,setMode]=useState<'offline'|'online'>('offline');
+  const [mode,setMode]=useState<'offline'|'online'>(role==='OWNER'?'online':'offline');
   const [query,setQuery]=useState('');
   const [answer,setAnswer]=useState('');
   const [onlineBusy,setOnlineBusy]=useState(false);
@@ -121,6 +121,7 @@ export default function BrandspireAssist({ language, role }: Props) {
     setOnlineError('');
     if(mode==='offline'||role!=='OWNER'){askOffline(query);return;}
     if(!query.trim())return;
+    if(!navigator.onLine){setOnlineError(language==='en'?'No internet. Select Offline Help for basic guidance.':'Internet nahi hai. Basic help ke liye Offline Help choose karein.');return;}
     setOnlineBusy(true);setAnswer('');
     try{
       const response=await askBusinessInsights(query.trim());
@@ -132,14 +133,14 @@ export default function BrandspireAssist({ language, role }: Props) {
   const quick = available.slice(0,4);
 
   return <>
-    <button type="button" className="assist-fab no-print" onClick={()=>setOpen(true)} aria-label={t.assist}><span>?</span><b>{t.assist}</b><small>{mode==='online'&&role==='OWNER'?'Online + Offline':t.offlineHelp}</small></button>
+    <button type="button" className="assist-fab no-print" onClick={()=>setOpen(true)} aria-label={t.assist}><span>?</span><b>{t.assist}</b><small>{role==='OWNER'?'AI + Help':t.offlineHelp}</small></button>
     {open&&<div className="assist-backdrop no-print" onMouseDown={(e)=>{if(e.target===e.currentTarget)setOpen(false);}}>
       <aside className="assist-panel" role="dialog" aria-modal="true" aria-label={t.assist}>
         <div className="assist-head"><div><span className="assist-logo">BP</span><div><strong>{t.assist}</strong><small>{role==='OWNER'?p8.ownerAssistHead:t.offlineHelp}</small></div></div><button className="assist-close" onClick={()=>setOpen(false)} aria-label={t.close}>×</button></div>
         {role==='OWNER'&&<div className="assist-mode-tabs"><button className={mode==='offline'?'active':''} onClick={()=>{setMode('offline');setAnswer('');setOnlineError('');}}>{p8.offlineMode}</button><button className={mode==='online'?'active':''} onClick={()=>{setMode('online');setAnswer('');setOnlineError('');}}>{p8.onlineInsights}</button></div>}
         <p className="assist-intro">{mode==='online'&&role==='OWNER'?p8.onlineInsightsSub:t.assistIntro}</p>
         {mode==='offline'&&<div className="assist-quick">{quick.map((item)=><button key={item.id} onClick={()=>{setQuery(item.q[language]);setAnswer(item.a[language]);}}>{item.q[language]}</button>)}</div>}
-        {onlineError&&<div className="assist-warning"><strong>{p8.aiUnavailable}</strong><span>{onlineError}</span></div>}
+        {onlineError&&<div className="assist-warning"><strong>{language==='en'?'Online AI unavailable right now':'Online AI abhi jawab nahi de pa raha'}</strong><span>{onlineError}</span></div>}
         {answer&&<div className="assist-answer"><span>BP</span><p>{answer}</p></div>}
         <form className="assist-form" onSubmit={submit}><input value={query} onChange={(e)=>setQuery(e.target.value)} placeholder={mode==='online'&&role==='OWNER'?p8.askBusiness:t.assistPlaceholder}/><button type="submit" disabled={onlineBusy}>{onlineBusy?'…':'→'}</button></form>
         <div className="assist-foot"><span>{mode==='online'&&role==='OWNER'?p8.controlledToolsFoot:p8.offlineFoot}</span>{(query||answer||onlineError)&&<button onClick={()=>{setQuery('');setAnswer('');setOnlineError('');}}>{t.clear}</button>}</div>
