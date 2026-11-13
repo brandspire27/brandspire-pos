@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { BadRequestException, Body, Controller, Get, Headers, Param, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Headers, HttpCode, Param, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { z } from 'zod';
 import { TursoService } from '../database/turso.service';
@@ -185,6 +185,7 @@ export class CashfreeWebhookController {
   constructor(private readonly cashfree: CashfreeService, private readonly orders: CashfreeOrdersService) {}
 
   @Post('webhook')
+  @HttpCode(200)
   async webhook(
     @Req() request: RawRequest,
     @Headers('x-webhook-signature') signature = '',
