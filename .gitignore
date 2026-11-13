@@ -36,3 +36,6 @@ reports/
 bsp2.zip
 apps/android/.gradle/
 apps/android/app/build/
+
+# Firebase local deployment cache
+.firebase/

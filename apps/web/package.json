@@ -4,6 +4,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:firebase": "node scripts/build-firebase.mjs",
     "start": "next start",
     "lint": "next lint",
     "test": "echo \"web tests pending\"",

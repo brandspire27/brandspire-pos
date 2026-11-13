@@ -43,7 +43,7 @@ export default function InvoicesPage() {
         <td>{invoice.customer_name || t.walkInCustomer}</td>
         <td><span className={`mini-status mini-${invoice.payment_status.toLowerCase()}`}>{localizedStatus(org.preferredLanguage, invoice.payment_status)}</span><small>{invoice.payment_method || '—'}</small></td>
         <td><strong>{formatINR(invoice.grand_total)}</strong></td><td><strong>{formatINR(invoice.amount_due)}</strong></td>
-        <td><button className="btn" onClick={() => router.push(`/owner/invoices/${invoice.id}`)}>{t.viewPrint}</button></td>
+        <td><button className="btn" onClick={() => router.push(`/owner/invoice?id=${invoice.id}`)}>{t.viewPrint}</button></td>
       </tr>)}
     </tbody></table></div></section>
   </OwnerShell>;

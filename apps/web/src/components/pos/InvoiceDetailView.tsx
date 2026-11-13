@@ -46,7 +46,7 @@ export default function InvoiceDetailView({ invoiceId, portal }:Props){
       const current=await getCurrentOrganization();
       if(!current){router.replace('/auth/login');return;}
       const expected=portal==='owner'?'OWNER':'STAFF';
-      if(current.role!==expected){router.replace(current.role==='OWNER'?`/owner/invoices/${invoiceId}`:`/staff/invoices/${invoiceId}`);return;}
+      if(current.role!==expected){router.replace(current.role==='OWNER'?`/owner/invoice?id=${invoiceId}`:`/staff/invoice?id=${invoiceId}`);return;}
       setOrg(current);
       const response=await getInvoiceDetail(invoiceId);
       const {invoice:row,items:invoiceItems,payments:invoicePayments,organization:businessRow,settings:settingsRow}=response.data;

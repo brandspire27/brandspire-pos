@@ -199,7 +199,7 @@ export default function AdminPage() {
             <div className="admin-panel-head"><div><span>ATTENTION QUEUE</span><h2>Businesses needing action</h2></div><Link href="/admin/organizations?attention=true">View all</Link></div>
             <div className="admin-list">
               {(dashboard?.attention ?? []).length === 0 ? <div className="admin-empty">No urgent tenant issues right now.</div> : dashboard?.attention.map((tenant) => (
-                <Link className="admin-list-row" href={`/admin/organizations/${tenant.id}`} key={tenant.id}>
+                <Link className="admin-list-row" href={`/admin/organization?id=${tenant.id}`} key={tenant.id}>
                   <div><strong>{tenant.name}</strong><small>{tenant.reason?.replaceAll('_', ' ') ?? 'Attention required'}</small></div>
                   <div className="admin-row-right"><span className={statusClass(tenant.subscription?.status ?? tenant.status)}>{tenant.subscription?.status ?? tenant.status}</span><small>{tenant.subscription?.ends_at ? adminDate(tenant.subscription.ends_at) : 'No end date'}</small></div>
                 </Link>

@@ -109,7 +109,7 @@ export default function OwnerDuesPage(){
           <label>{t.paymentMethod}<select value={method} onChange={(e)=>setMethod(e.target.value as PaymentMethod)}><option value="CASH">Cash</option><option value="UPI">UPI</option><option value="CARD">Card</option><option value="OTHER">Other</option></select></label>
           <label>{t.note} <span className="muted">({t.optional})</span><textarea value={note} onChange={(e)=>setNote(e.target.value)} placeholder={t.notePlaceholder} rows={3}/></label>
           <button className="btn btn-primary" disabled={saving}>{saving?t.recording:t.recordPayment}</button>
-          <button type="button" className="btn" onClick={()=>router.push(`/owner/invoices/${selected.id}`)}>{t.openInvoice}</button>
+          <button type="button" className="btn" onClick={()=>router.push(`/owner/invoice?id=${selected.id}`)}>{t.openInvoice}</button>
         </form>}
       </aside>
     </div>

@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { adminDate, adminMoney, adminRequest } from '@/lib/admin-api';
 
 type Detail = {
@@ -18,10 +18,10 @@ type Detail = {
   audit: Array<{ id: string; actor_role: string; action: string; entity_type: string; summary: Record<string, unknown>; created_at: string }>;
 };
 
-export default function AdminOrganizationDetailPage() {
-  const params = useParams<{ id: string }>();
+function AdminOrganizationDetailContent() {
+  const params = useSearchParams();
   const router = useRouter();
-  const id = params.id;
+  const id = params.get('id') ?? ''; 
   const [data, setData] = useState<Detail | null>(null);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState('');
@@ -29,6 +29,7 @@ export default function AdminOrganizationDetailPage() {
   const [message, setMessage] = useState('');
 
   const load = useCallback(async () => {
+    if(!id){setLoading(false);setError('Organization ID missing.');return;}
     setLoading(true); setError('');
     try {
       const response = await adminRequest<{ success: true; data: Detail }>(`/organizations/${id}`);
@@ -104,3 +105,5 @@ export default function AdminOrganizationDetailPage() {
     <section className="admin-panel"><div className="admin-panel-head"><div><span>AUDIT</span><h2>Recent tenant activity</h2></div><Link href={`/admin/audit?organizationId=${id}`}>Open full audit</Link></div><div className="admin-list">{data.audit.slice(0, 15).map((row) => <div className="admin-list-row" key={row.id}><div><strong>{row.action.replaceAll('_', ' ')}</strong><small>{row.actor_role} · {row.entity_type}</small></div><div className="admin-row-right"><small>{adminDate(row.created_at)}</small></div></div>)}</div></section>
   </main>;
 }
+
+export default function Page(){return <Suspense fallback={<p>Loading organization…</p>}><AdminOrganizationDetailContent/></Suspense>;}

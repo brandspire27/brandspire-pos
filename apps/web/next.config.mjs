@@ -8,9 +8,11 @@ const securityHeaders = [
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  ...(process.env.FIREBASE_STATIC_EXPORT === 'true' ? {output:'export'} : {}),
   poweredByHeader: false,
   reactStrictMode: true,
   async headers() {
+    if(process.env.FIREBASE_STATIC_EXPORT === 'true')return [];
     return [
       {source:'/pos-sw.js',headers:[{key:'Cache-Control',value:'no-cache, no-store, must-revalidate'},{key:'Service-Worker-Allowed',value:'/'}]},
       {
