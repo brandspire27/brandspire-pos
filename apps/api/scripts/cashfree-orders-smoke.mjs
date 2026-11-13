@@ -12,7 +12,7 @@ let failWrite=false;
 const database={execute:(sql,args=[])=>client.execute({sql,args}),async transaction(work){const tx=await client.transaction('write');try{const out=await work({execute:async query=>{if(failWrite&&query.sql.includes('INSERT INTO payment_transactions'))throw Error('simulated disk failure');return tx.execute(query);}});await tx.commit();return out;}catch(e){await tx.rollback();throw e;}finally{tx.close();}}};
 let status='ACTIVE',amount=100,currency='INR',paymentStatus='SUCCESS',providerDown=false;
 let requests=[];
-const provider={isConfigured:()=>true,getEnvironment:()=> 'sandbox',request:async(path,init)=>{requests.push(path);if(providerDown)throw Error('provider unavailable');if(init){const body=JSON.parse(init.body);assert.equal(body.order_amount,100);return {order_id:body.order_id,payment_session_id:'session_'+body.order_id};}const orderId=path.split('/')[2];return path.endsWith('/payments')?[{cf_payment_id:'pay_'+orderId,payment_status:paymentStatus,payment_amount:amount,payment_currency:currency,payment_time:'2026-11-13T00:00:00Z'}]:{order_id:orderId,order_status:status,order_amount:amount,order_currency:currency};}};
+const provider={isConfigured:()=>true,getEnvironment:()=> 'sandbox',request:async(path,init)=>{requests.push(path);if(providerDown)throw Error('provider unavailable');if(init){const body=JSON.parse(init.body);assert.equal(body.order_amount,amount);return {order_id:body.order_id,payment_session_id:'session_'+body.order_id};}const orderId=path.split('/')[2];return path.endsWith('/payments')?[{cf_payment_id:'pay_'+orderId,payment_status:paymentStatus,payment_amount:amount,payment_currency:currency,payment_time:'2026-11-13T00:00:00Z'}]:{order_id:orderId,order_status:status,order_amount:amount,order_currency:currency};}};
 try{
  await applyMigrations(client,fileURLToPath(new URL('../migrations',import.meta.url)));
  await database.execute("INSERT INTO user_profiles(firebase_uid,email) VALUES ('owner','owner@example.test')");
@@ -47,6 +47,21 @@ try{
  assert.deepEqual(await service.webhook(Buffer.from(JSON.stringify({data:{subscription_details:{subscription_id:'old'}}}))),{ignored:true});
  assert.equal(addBillingPeriod(new Date('2026-01-31T10:00:00Z'),'MONTHLY'),'2026-02-28T10:00:00.000Z');
  assert.equal(addBillingPeriod(new Date('2024-02-29T10:00:00Z'),'YEARLY'),'2025-02-28T10:00:00.000Z');
+ await database.execute("UPDATE plans SET monthly_price=399,half_yearly_price=1799,yearly_price=3499 WHERE id='plan'");
+ for(const [cycle,price,months] of [['MONTHLY',399,1],['HALF_YEARLY',1799,6],['YEARLY',3499,12]]){
+   amount=price;
+   const previousEnd=(await database.execute('SELECT ends_at FROM subscriptions ORDER BY created_at DESC LIMIT 1')).rows[0].ends_at;
+   const term=await service.checkout('org','owner','owner@example.test','plan',cycle);
+   assert.equal(term.amount,price);
+   await service.verify('org','owner',term.orderId);
+   const latest=(await database.execute('SELECT ends_at,term_months FROM subscriptions ORDER BY created_at DESC LIMIT 1')).rows[0];
+   assert.equal(latest.term_months,months);
+   assert.equal(latest.ends_at,addBillingPeriod(new Date(previousEnd),cycle));
+   await service.verify('org','owner',term.orderId);
+   assert.equal((await database.execute('SELECT ends_at FROM subscriptions ORDER BY created_at DESC LIMIT 1')).rows[0].ends_at,latest.ends_at);
+ }
+ assert.equal(addBillingPeriod(new Date('2026-08-31T10:00:00Z'),'HALF_YEARLY'),'2027-02-28T10:00:00.000Z');
+ amount=399;
  const testOrder=await service.checkout('org','owner','owner@example.test','plan','MONTHLY');
  require('../dist/config/runtime-config.js').getRuntimeConfig().appEnv='production';
  const before=(await database.execute('SELECT count(*) AS n FROM subscriptions')).rows[0].n;

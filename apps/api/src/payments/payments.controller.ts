@@ -12,7 +12,7 @@ type OwnerRequest = { ownerUserId?: string; organizationId?: string; ownerEmail?
 type AdminRequest = { adminUserId?: string; adminEmail?: string };
 type RawRequest = { rawBody?: Buffer };
 
-const checkoutSchema = z.object({ planId: z.string().uuid(), billingCycle: z.enum(['MONTHLY','YEARLY']) });
+const checkoutSchema = z.object({ planId: z.string().uuid(), billingCycle: z.enum(['MONTHLY','HALF_YEARLY','YEARLY']) });
 const verifySchema = z.object({ orderId: z.string().regex(/^bsp_[a-f0-9]{32}$/) });
 const cancelSchema = z.object({ cancelAtPeriodEnd: z.boolean().default(true) });
 const syncPlanSchema = z.object({ billingCycle: z.enum(['MONTHLY','YEARLY']) });
@@ -26,7 +26,7 @@ export class OwnerSubscriptionController {
   async overview(@Req() request: OwnerRequest) {
     const [subscriptionResult, planResult, transactionResult, pendingResult] = await Promise.all([
       this.database.execute(`SELECT id, plan_id, status, starts_at, ends_at, grace_ends_at, admin_message, provider, provider_subscription_id, provider_status, billing_cycle, cancel_at_period_end, last_payment_at, next_charge_at, created_at FROM subscriptions WHERE organization_id = ? ORDER BY created_at DESC LIMIT 5`, [request.organizationId!]),
-      this.database.execute(`SELECT id, code, name, monthly_price, yearly_price, currency, minimum_months, features, provider_monthly_plan_id, provider_yearly_plan_id FROM plans WHERE active = 1 ORDER BY monthly_price`),
+      this.database.execute(`SELECT id, code, name, monthly_price, half_yearly_price, yearly_price, currency, minimum_months, features, provider_monthly_plan_id, provider_yearly_plan_id FROM plans WHERE active = 1 ORDER BY monthly_price`),
       this.database.execute(`SELECT id, amount, currency, status, method, provider_payment_id, created_at, captured_at FROM payment_transactions WHERE organization_id = ? ORDER BY created_at DESC LIMIT 20`, [request.organizationId!]),
       this.database.execute(`SELECT provider_order_id AS order_id, amount, currency, created_at FROM subscription_checkout_sessions WHERE organization_id=? AND created_by=? AND provider='CASHFREE_PG' AND status != 'ACTIVATED' ORDER BY created_at DESC LIMIT 5`, [request.organizationId!,request.ownerUserId!])
     ]);
@@ -124,7 +124,7 @@ export class AdminBillingController {
   @Get('overview')
   async overview(@Req() _request: AdminRequest) {
     const [plans, subscriptions, transactions, webhooks] = await Promise.all([
-      this.database.execute(`SELECT id, code, name, monthly_price, yearly_price, currency, active, provider_monthly_plan_id, provider_yearly_plan_id FROM plans ORDER BY created_at`),
+      this.database.execute(`SELECT id, code, name, monthly_price, half_yearly_price, yearly_price, currency, active, provider_monthly_plan_id, provider_yearly_plan_id FROM plans ORDER BY created_at`),
       this.database.execute(`SELECT id, organization_id, status, provider, provider_status, provider_subscription_id, billing_cycle, starts_at, ends_at, created_at FROM subscriptions ORDER BY created_at DESC LIMIT 100`),
       this.database.execute(`SELECT id, organization_id, amount, currency, status, method, provider_payment_id, created_at FROM payment_transactions ORDER BY created_at DESC LIMIT 100`),
       this.database.execute(`SELECT provider_event_id, event_type, processing_status, organization_id, received_at, processed_at, error_message FROM payment_webhook_events WHERE provider = 'CASHFREE' ORDER BY received_at DESC LIMIT 50`)
@@ -150,7 +150,7 @@ export class AdminBillingController {
     if (!parsed.success) throw new BadRequestException('Select MONTHLY or YEARLY');
 
     const result = await this.database.execute(
-      `SELECT id, name, monthly_price, yearly_price, currency, provider_monthly_plan_id, provider_yearly_plan_id
+      `SELECT id, name, monthly_price, half_yearly_price, yearly_price, currency, provider_monthly_plan_id, provider_yearly_plan_id
        FROM plans WHERE id = ? LIMIT 1`,
       [planId]
     );

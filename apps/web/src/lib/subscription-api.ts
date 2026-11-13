@@ -8,9 +8,9 @@ export type SubscriptionOverview = {
   pendingOrders: Array<{order_id:string;amount:number;currency:string;created_at:string}>;
   configured: boolean;
   mode: 'sandbox' | 'production';
-  current: null | { id:string; plan_id:string|null; status:string; starts_at:string|null; ends_at:string|null; admin_message:string|null; provider:string|null; provider_subscription_id:string|null; provider_status:string|null; billing_cycle:'MONTHLY'|'YEARLY'|null; cancel_at_period_end:boolean; last_payment_at:string|null; next_charge_at:string|null };
+  current: null | { id:string; plan_id:string|null; status:string; starts_at:string|null; ends_at:string|null; admin_message:string|null; provider:string|null; provider_subscription_id:string|null; provider_status:string|null; billing_cycle:'MONTHLY'|'HALF_YEARLY'|'YEARLY'|null; cancel_at_period_end:boolean; last_payment_at:string|null; next_charge_at:string|null };
   history: Array<Record<string, unknown>>;
-  plans: Array<{ id:string; code:string; name:string; monthly_price:number|null; yearly_price:number|null; currency:string; minimum_months:number; features:Record<string,unknown>; provider_monthly_plan_id:string|null; provider_yearly_plan_id:string|null }>;
+  plans: Array<{ id:string; code:string; name:string; monthly_price:number|null; half_yearly_price:number|null; yearly_price:number|null; currency:string; minimum_months:number; features:Record<string,unknown>; provider_monthly_plan_id:string|null; provider_yearly_plan_id:string|null }>;
   transactions: Array<{ id:string; amount:number; currency:string; status:string; method:string|null; provider_payment_id:string|null; created_at:string; captured_at:string|null }>;
 };
 
@@ -18,8 +18,8 @@ export function getSubscriptionOverview() {
   return request<{ success:true; data:SubscriptionOverview }>('/api/owner/subscription/overview');
 }
 
-export function createSubscriptionCheckout(planId:string, billingCycle:'MONTHLY'|'YEARLY') {
-  return request<{ success:true; data:{ sessionId:string; paymentSessionId:string; orderId:string; amount:number; currency:string; billingCycle:'MONTHLY'|'YEARLY' } }>('/api/owner/subscription/checkout', { method:'POST', body:JSON.stringify({ planId, billingCycle }) });
+export function createSubscriptionCheckout(planId:string, billingCycle:'MONTHLY'|'HALF_YEARLY'|'YEARLY') {
+  return request<{ success:true; data:{ sessionId:string; paymentSessionId:string; orderId:string; amount:number; currency:string; billingCycle:'MONTHLY'|'HALF_YEARLY'|'YEARLY' } }>('/api/owner/subscription/checkout', { method:'POST', body:JSON.stringify({ planId, billingCycle }) });
 }
 
 export function verifySubscriptionCheckout(input:{ orderId:string }) {

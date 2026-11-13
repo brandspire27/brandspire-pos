@@ -4,8 +4,8 @@ import { TursoService } from '../database/turso.service';
 import { CashfreeService } from './cashfree.service';
 import { getRuntimeConfig } from '../config/runtime-config';
 
-type Cycle = 'MONTHLY' | 'YEARLY';
-type Session = { id:string; organization_id:string; created_by:string; plan_id:string; billing_cycle:Cycle; amount:number; currency:string; status:string; subscription_id:string|null; metadata:string };
+type Cycle = 'MONTHLY' | 'HALF_YEARLY' | 'YEARLY';
+type Session = { id:string; organization_id:string; created_by:string; plan_id:string; billing_cycle:Cycle; term_months:number|null; amount:number; currency:string; status:string; subscription_id:string|null; metadata:string };
 type Order = { order_id:string; order_status:string; order_amount:number; order_currency:string; payment_session_id?:string };
 type Payment = { cf_payment_id:string|number; payment_status:string; payment_amount:number; payment_currency:string; payment_time?:string; payment_group?:string };
 const money = (value:unknown) => Math.round(Number(value) * 100);
@@ -20,19 +20,22 @@ export class CashfreeOrdersService {
     const plan = (await this.database.execute('SELECT * FROM plans WHERE id = ? AND active = 1', [planId])).rows[0];
     const org = (await this.database.execute('SELECT name, phone FROM organizations WHERE id = ?', [organizationId])).rows[0];
     if (!plan || !org) throw new BadRequestException('Plan or business not found');
-    const amount = Number(cycle === 'MONTHLY' ? plan.monthly_price : plan.yearly_price);
+    const termMonths = cycle === 'YEARLY' ? 12 : cycle === 'HALF_YEARLY' ? 6 : 1;
+    const amount = Number(cycle === 'MONTHLY' ? plan.monthly_price : cycle === 'HALF_YEARLY' ? plan.half_yearly_price : plan.yearly_price);
     if (!Number.isFinite(amount) || amount <= 0) throw new BadRequestException('This plan price is unavailable.');
-    if (cycle === 'MONTHLY' && Number(plan.minimum_months) > 1) throw new BadRequestException('This plan requires a longer term. Choose yearly billing.');
+    if (Number(plan.minimum_months) > termMonths) throw new BadRequestException('This plan requires a longer term. Choose yearly billing.');
     const phone = String(org.phone ?? '').replace(/\D/g, '').slice(-10);
     if (!/^[6-9]\d{9}$/.test(phone)) throw new BadRequestException('Add a valid business mobile number first.');
     if (!config.publicApiUrl) throw new BadRequestException('Public backend URL is missing.');
     // Record before the provider call, so an early webhook or a lost response remains recoverable.
     const id = randomUUID();
     const orderId = `bsp_${id.replace(/-/g, '')}`;
+    // Legacy cycle CHECK allows MONTHLY/YEARLY only. term_months is the
+    // authoritative purchased duration; six months is six monthly intervals.
     await this.database.execute(`INSERT INTO subscription_checkout_sessions
-      (id,organization_id,created_by,plan_id,billing_cycle,amount,currency,provider,provider_order_id,metadata)
-      VALUES (?,?,?,?,?,?,?,'CASHFREE_PG',?,?)`,
-      [id,organizationId,ownerId,planId,cycle,amount,String(plan.currency),orderId,JSON.stringify({mode:this.cashfree.getEnvironment()})]);
+      (id,organization_id,created_by,plan_id,billing_cycle,amount,currency,provider,provider_order_id,metadata,term_months)
+      VALUES (?,?,?,?,?,?,?,'CASHFREE_PG',?,?,?)`,
+      [id,organizationId,ownerId,planId,cycle === 'YEARLY' ? 'YEARLY' : 'MONTHLY',amount,String(plan.currency),orderId,JSON.stringify({mode:this.cashfree.getEnvironment()}),termMonths]);
     const order = await this.cashfree.request<Order>('/orders', {method:'POST',headers:{'x-idempotency-key':id},body:JSON.stringify({
       order_id:orderId,order_amount:amount,order_currency:plan.currency,
       customer_details:{customer_id:organizationId,customer_name:org.name,customer_email:email,customer_phone:phone},
@@ -78,12 +81,12 @@ export class CashfreeOrdersService {
       const now = new Date();
       const remaining = current && ['ACTIVE','TRIAL','GRACE_PERIOD'].includes(String(current.status)) && Date.parse(String(current.ends_at)) > now.getTime();
       const start = remaining ? new Date(String(current.ends_at)) : now;
-      const endsAt = addBillingPeriod(start,session.billing_cycle);
+      const endsAt = addBillingPeriod(start,session.term_months === 6 ? 'HALF_YEARLY' : session.term_months === 12 ? 'YEARLY' : session.billing_cycle);
       const subscriptionId = randomUUID();
-      await tx.execute({sql:`INSERT INTO subscriptions(id,organization_id,plan_id,status,starts_at,ends_at,provider,provider_status,billing_cycle,last_payment_at,admin_message,created_at)
-        VALUES (?,?,?,'ACTIVE',?,?,'CASHFREE_PG','PAID',?,?,?,?)`,
+      await tx.execute({sql:`INSERT INTO subscriptions(id,organization_id,plan_id,status,starts_at,ends_at,provider,provider_status,billing_cycle,last_payment_at,admin_message,created_at,term_months)
+        VALUES (?,?,?,'ACTIVE',?,?,'CASHFREE_PG','PAID',?,?,?,?,?)`,
         args:[subscriptionId,session.organization_id,session.plan_id,now.toISOString(),endsAt,session.billing_cycle,paidAt,'One-time payment. Renew manually; no automatic debit.',
-          new Date(Math.max(now.getTime(),Date.parse(String(current?.created_at)) + 1 || 0)).toISOString()]});
+          new Date(Math.max(now.getTime(),Date.parse(String(current?.created_at)) + 1 || 0)).toISOString(),session.term_months ?? (session.billing_cycle === 'YEARLY' ? 12 : 1)]});
       await tx.execute({sql:`INSERT INTO payment_transactions(id,organization_id,subscription_id,checkout_session_id,provider,provider_payment_id,amount,currency,status,method,captured_at,metadata)
         VALUES (?,?,?,?,'CASHFREE_PG',?,?,?,'SUCCESS',?,?,?)`,args:[randomUUID(),session.organization_id,subscriptionId,session.id,String(payment.cf_payment_id),session.amount,session.currency,payment.payment_group ?? null,paidAt,JSON.stringify({order_id:orderId,mode:this.cashfree.getEnvironment()})]});
       await tx.execute({sql:`UPDATE subscription_checkout_sessions SET status='ACTIVATED',subscription_id=?,payment_id=?,signature_verified_at=?,updated_at=? WHERE id=?`,args:[subscriptionId,String(payment.cf_payment_id),now.toISOString(),now.toISOString(),session.id]});
@@ -117,7 +120,7 @@ export function addBillingPeriod(start:Date, cycle:Cycle) {
   const end = new Date(start);
   const day = end.getUTCDate();
   end.setUTCDate(1);
-  end.setUTCMonth(end.getUTCMonth() + (cycle === 'YEARLY' ? 12 : 1));
+  end.setUTCMonth(end.getUTCMonth() + (cycle === 'YEARLY' ? 12 : cycle === 'HALF_YEARLY' ? 6 : 1));
   const last = new Date(Date.UTC(end.getUTCFullYear(),end.getUTCMonth()+1,0)).getUTCDate();
   end.setUTCDate(Math.min(day,last));
   return end.toISOString();

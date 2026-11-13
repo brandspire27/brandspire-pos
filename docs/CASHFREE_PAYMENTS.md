@@ -18,7 +18,9 @@ Both signed webhooks and owner-scoped Check payment requests fetch the order and
 
 Activation, payment history, checkout completion and entitlement changes commit in one database transaction. Replays do not extend access twice. Failed webhook processing can retry. Recent checkout entries allow checking a payment after a closed tab or missing webhook. Pending or failed orders leave existing access unchanged.
 
-Renewals preserve remaining active/trial/grace days and add one calendar month or year, clamped for month-end/leap dates. A selected plan takes effect on successful payment. No automatic debit is scheduled. Refund/dispute automation and AutoPay are not part of this release.
+Renewals preserve remaining active/trial/grace days and add 1, 6 or 12 calendar months, clamped for month-end/leap dates. A selected plan takes effect on successful payment. No automatic debit is scheduled. Refund/dispute automation and AutoPay are not part of this release.
+
+Approved Basic pricing (13 November 2026): INR 399/month, INR 1799/6 months, INR 3499/year. Migration 0005 adds half_yearly_price and term_months. Purchased term_months is saved before checkout and governs access duration; the legacy MONTHLY/YEARLY column retains its interval unit for old readers. Existing sessions without term_months use their original cycle. Prices are configured in the live catalog, not overwritten by migrations.
 
 ## Local regression
 

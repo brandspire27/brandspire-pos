@@ -61,7 +61,7 @@ export default function SubscriptionPage() {
   if(loading || !org) return <WorkspaceLoader/>;
   const t = phase9Text(org.preferredLanguage);
 
-  async function start(planId:string, cycle:'MONTHLY'|'YEARLY'){
+  async function start(planId:string, cycle:'MONTHLY'|'HALF_YEARLY'|'YEARLY'){
     setWorking(`${planId}-${cycle}`);setError('');setSuccess('');
     try{
       const checkout = (await createSubscriptionCheckout(planId,cycle)).data;
@@ -113,7 +113,11 @@ export default function SubscriptionPage() {
     {!overview?.configured&&<div className="soft-note top-gap">{t.notConfigured}</div>}
 
     <section className="card pos-panel top-gap"><div className="panel-head"><div><span className="page-kicker">{t.planOptions}</span><h2>Brandspire POS</h2></div></div>
-      {overview && overview.plans.length===0 && <div className="soft-note">Subscription plans abhi publish nahi hue hain. Price set hone ke baad Pay now yahan dikhega.</div>}<div className="subscription-plan-grid">{(overview?.plans??[]).map(plan=><article className="subscription-plan" key={plan.id}><div><span className="page-kicker">{plan.code}</span><h3>{plan.name}</h3></div><div className="plan-price-row"><div><small>{t.monthly}</small><strong>{formatINR(plan.monthly_price)}</strong><button className="btn btn-primary" disabled={!overview?.configured||working!==''} onClick={()=>start(plan.id,'MONTHLY')}>{working===`${plan.id}-MONTHLY`?'…':t.start}</button></div><div><small>{t.yearly} · {t.saveYearly}</small><strong>{formatINR(plan.yearly_price)}</strong><button className="btn btn-secondary" disabled={!overview?.configured||working!==''} onClick={()=>start(plan.id,'YEARLY')}>{working===`${plan.id}-YEARLY`?'…':t.start}</button></div></div></article>)}</div>
+      {overview && overview.plans.length===0 && <div className="soft-note">Subscription plans abhi publish nahi hue hain. Price set hone ke baad Pay now yahan dikhega.</div>}<div className="subscription-plan-grid">{(overview?.plans??[]).map(plan=><article className="subscription-plan" key={plan.id}><div><span className="page-kicker">{plan.code}</span><h3>{plan.name}</h3></div><div className="plan-price-row">{([
+        {cycle:'MONTHLY',label:'1 month',price:plan.monthly_price},
+        {cycle:'HALF_YEARLY',label:'6 months',price:plan.half_yearly_price},
+        {cycle:'YEARLY',label:'1 year',price:plan.yearly_price}
+      ] as const).map(option=><div key={option.cycle}><small>{option.label}</small><strong>{option.price!=null?formatINR(option.price):'Unavailable'}</strong><button className="btn btn-primary" disabled={!overview?.configured||working!==''||!option.price} onClick={()=>start(plan.id,option.cycle)}>{working===`${plan.id}-${option.cycle}`?'…':'Pay now'}</button></div>)}</div></article>)}</div>
     </section>
 
     {(overview?.pendingOrders??[]).length>0 && <section className="card pos-panel top-gap"><h2>Recent checkouts</h2><p>Payment kar diya? Dobara pay karne se pehle status check karein.</p>{overview?.pendingOrders.map(order=><div className="compact-row" key={order.order_id}><span>{formatINR(order.amount)} · {formatDateTime(order.created_at)}</span><button className="btn btn-secondary" disabled={working!==''} onClick={()=>void checkOrder(order.order_id)}>Check payment</button></div>)}</section>}
