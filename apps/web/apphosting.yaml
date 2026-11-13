@@ -1,0 +1,20 @@
+# Firebase App Hosting: repository brandspire27/brandspire-pos, app root apps/web.
+# Firebase browser config must be supplied in the console at BUILD time.
+# Do not put backend service accounts, Turso tokens or Groq keys in this frontend.
+runConfig:
+  minInstances: 0
+  maxInstances: 2
+  cpu: 1
+  memoryMiB: 512
+  concurrency: 80
+env:
+  - variable: NEXT_PUBLIC_API_URL
+    value: https://brandspire-pos-api.onrender.com
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
+    value: bsp-pos
+    availability:
+      - BUILD
+      - RUNTIME
