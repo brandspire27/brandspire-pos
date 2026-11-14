@@ -29,6 +29,10 @@ try{
  currency='INR';paymentStatus='FAILED';await assert.rejects(service.verify('org','owner',order),/not confirmed/);
  paymentStatus='SUCCESS';
  const body=Buffer.from(JSON.stringify({type:'PAYMENT_SUCCESS_WEBHOOK',data:{order:{order_id:order}}}));
+ status='ACTIVE';
+ await assert.rejects(service.webhook(body),/confirmation is pending/);
+ assert.equal((await database.execute('SELECT count(*) AS n FROM subscriptions')).rows[0].n,0);
+ status='PAID';
  failWrite=true;await assert.rejects(service.webhook(body),/disk failure/);
  assert.equal((await database.execute('SELECT count(*) AS n FROM subscriptions')).rows[0].n,0);
  assert.equal((await database.execute('SELECT processing_status FROM payment_webhook_events')).rows[0].processing_status,'FAILED');
@@ -39,6 +43,15 @@ try{
  assert.equal((await database.execute('SELECT ends_at FROM subscriptions')).rows[0].ends_at,end);
  assert.equal((await database.execute('SELECT count(*) AS n FROM payment_transactions')).rows[0].n,1);
  assert.equal((await database.execute('SELECT processing_status FROM payment_webhook_events')).rows[0].processing_status,'PROCESSED');
+ // Late failed events and differently formatted duplicates cannot undo or extend a paid order.
+ await service.webhook(Buffer.from(JSON.stringify({type:'PAYMENT_FAILED_WEBHOOK',data:{order:{order_id:order}}})));
+ await service.webhook(Buffer.from(JSON.stringify({type:'PAYMENT_SUCCESS_WEBHOOK',data:{order:{order_id:order}},event_time:'later'})));
+ assert.equal((await database.execute('SELECT ends_at FROM subscriptions')).rows[0].ends_at,end);
+ assert.equal((await database.execute('SELECT count(*) AS n FROM payment_transactions')).rows[0].n,1);
+ await assert.rejects(service.verify('org','another-owner',order),/not found/);
+ await assert.rejects(service.webhook(Buffer.from('null')),/Invalid webhook payload/);
+ await assert.rejects(service.webhook(Buffer.from('{')),/Invalid webhook JSON/);
+ assert.deepEqual(await service.webhook(Buffer.from(JSON.stringify({data:{order:{order_id:'unknown'}}}))),{ignored:true});
  const renewal=await service.checkout('org','owner','owner@example.test','plan','MONTHLY');
  providerDown=true;await assert.rejects(service.verify('org','owner',renewal.orderId),/unavailable/);providerDown=false;
  await service.verify('org','owner',renewal.orderId);
@@ -62,6 +75,17 @@ try{
  }
  assert.equal(addBillingPeriod(new Date('2026-08-31T10:00:00Z'),'HALF_YEARLY'),'2027-02-28T10:00:00.000Z');
  amount=399;
+ const raced=await service.checkout('org','owner','owner@example.test','plan','MONTHLY');
+ const raceBefore=Number((await database.execute('SELECT count(*) AS n FROM payment_transactions')).rows[0].n);
+ const racedBody=Buffer.from(JSON.stringify({type:'PAYMENT_SUCCESS_WEBHOOK',data:{order:{order_id:raced.orderId}}}));
+ // A contending SQLite writer may need retry; it must never double-activate.
+ await Promise.allSettled([service.verify('org','owner',raced.orderId),service.webhook(racedBody),service.verify('org','owner',raced.orderId)]);
+ await service.verify('org','owner',raced.orderId);
+ await service.webhook(racedBody);
+ assert.equal(Number((await database.execute('SELECT count(*) AS n FROM payment_transactions')).rows[0].n),raceBefore+1);
+ const wrongMode=await service.checkout('org','owner','owner@example.test','plan','MONTHLY');
+ await database.execute("UPDATE subscription_checkout_sessions SET metadata=? WHERE provider_order_id=?",[JSON.stringify({mode:'production'}),wrongMode.orderId]);
+ await assert.rejects(service.verify('org','owner',wrongMode.orderId),/environment does not match/);
  const testOrder=await service.checkout('org','owner','owner@example.test','plan','MONTHLY');
  require('../dist/config/runtime-config.js').getRuntimeConfig().appEnv='production';
  const before=(await database.execute('SELECT count(*) AS n FROM subscriptions')).rows[0].n;

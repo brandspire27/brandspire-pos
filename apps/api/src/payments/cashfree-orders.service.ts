@@ -98,6 +98,7 @@ export class CashfreeOrdersService {
   async webhook(rawBody:Buffer) {
     let payload:any;
     try { payload = JSON.parse(rawBody.toString('utf8')); } catch { throw new BadRequestException('Invalid webhook JSON'); }
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new BadRequestException('Invalid webhook payload');
     const orderId = payload.data?.order?.order_id;
     // Recurring mandate events must never grant access while AutoPay is disabled.
     if (typeof orderId !== 'string') return {ignored:true};
@@ -107,6 +108,11 @@ export class CashfreeOrdersService {
     await this.database.execute(`INSERT INTO payment_webhook_events(id,provider,provider_event_id,event_type,payload_hash) VALUES (?,'CASHFREE',?,?,?) ON CONFLICT(provider,provider_event_id) DO NOTHING`,[randomUUID(),eventId,String(payload.type ?? 'PAYMENT'),eventId]);
     try {
       const result = await this.reconcile(orderId);
+      // A success notification can precede the order API becoming consistent.
+      // Do not acknowledge it as complete until reconciliation can grant access.
+      if (payload.type === 'PAYMENT_SUCCESS_WEBHOOK' && !result.verified && result.providerStatus !== 'TEST_PAYMENT_SUCCESS') {
+        throw new BadGatewayException('Payment confirmation is pending. Retry this notification.');
+      }
       await this.database.execute(`UPDATE payment_webhook_events SET processing_status='PROCESSED',error_message=NULL,processed_at=? WHERE provider='CASHFREE' AND provider_event_id=?`,[new Date().toISOString(),eventId]);
       return result;
     } catch (error) {
