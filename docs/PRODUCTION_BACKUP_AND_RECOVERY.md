@@ -1,29 +1,22 @@
-# Brandspire POS - production backup & recovery runbook
+# BrandSpire production backup and recovery
 
-## Before launch
-- Confirm the Supabase project has the backup/restore capability appropriate to the selected plan.
-- Record who is authorized to restore production data.
-- Never keep database passwords or service-role keys inside this repository.
-- Complete at least one restore drill on a non-production project before calling backups verified.
+Updated 14 November 2026. Current runtime is Firebase Authentication, Turso/libSQL data, and optional R2 file storage. Supabase-era recovery instructions are obsolete for the current API.
 
-## Before a destructive migration
-1. Use a maintenance window if billing can be affected.
-2. Take a database backup/export using supported Supabase tooling.
-3. Save the exact migration SQL and release SHA.
-4. Run the migration on staging first.
-5. Verify login, workspace bootstrap, test invoice, stock mutation, payment collection and reports.
-6. Only then apply to production.
+## Verified scope
+The local closed-database backup/restore drill passed using scripts/backup-restore-smoke.mjs: integrity and foreign keys, exact invoice/item/payment/stock records, and retry after restoration. This is NOT proof that live Turso backups or R2 recovery are configured.
 
-## Recovery priorities
-1. Preserve invoice/payment records and audit history.
-2. Restore tenant isolation/RLS before normal access.
-3. Restore organization, owner/staff and subscription state.
-4. Restore catalog/customer data.
-5. Reconcile Android offline invoices using client_invoice_id; never create replacements blindly.
+## Before accepting real shop data
+- Verify provider backup availability, retention and restore procedure for the actual Turso account/plan.
+- Record an authorized restore operator, secure backup destination, encryption and retention policy.
+- Restore a production-shaped snapshot into a separate staging database; never overwrite production for a drill.
+- Verify Firebase identity-to-membership mapping, tenant isolation, migration versions and R2 file references after restore.
+- Compare invoice counts and totals, payments, dues, stock movements, subscriptions and audit records.
+- Replay a known client invoice ID and Cashfree order: neither may duplicate a bill/payment or extend access twice.
+- Reconcile successful provider payments newer than the restored snapshot before opening writes.
+- Record measured recovery time and data-loss window; agree acceptable targets before launch.
 
-## Restore drill checklist
-- Restore into a separate project/database, not over production.
-- Run Phase 15 security tests against the restored environment.
-- Compare invoice counts, payment totals, product stock and organization counts.
-- Test one Owner and one Staff tenant.
-- Record recovery time and every manual step.
+## Device data
+Unsynced browser IndexedDB or Android Room data is not included in a cloud database backup. Do not uninstall/reset the device or clear browser storage while bills are pending. Export/recovery for device loss needs its own verified process.
+
+## Incident sequence
+Restrict writes when necessary, preserve logs/queues, restore to staging, verify counts and permissions, reconcile external payments, then switch the service after review. Keep the previous database read-only until reconciliation is complete. Do not recreate invoices blindly.

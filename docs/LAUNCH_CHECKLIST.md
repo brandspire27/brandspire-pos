@@ -1,49 +1,22 @@
-# Brandspire POS - launch checklist
+# BrandSpire launch acceptance checklist
 
-## Environments
-- [ ] Separate staging and production Supabase projects (recommended).
-- [ ] Production API and web use HTTPS.
-- [ ] Production clients contain only public/anon values.
-- [ ] Service-role, Cashfree secrets and AI key exist only on trusted backend secret storage.
-- [ ] CORS lists exact production web origins.
+Updated 14 November 2026. This checklist replaces Supabase-specific assumptions with the current Firebase/Turso stack.
 
-## Database & security
-- [ ] All migrations applied in order.
-- [ ] Phase 15 tenant-isolation/security tests pass on staging.
-- [ ] RLS verified for Owner A vs Owner B and Staff.
-- [ ] Backup/restore drill completed.
-- [ ] Admin audit logs verified.
+- [x] Payment reconciliation, rollback/retry and duplicate activation regression tests
+- [x] Sandbox hosted checkout success and bank-decline scenario
+- [x] Background recovery and pending checkout reuse implemented and deployed
+- [x] Local database copy/restore and post-restore invoice retry drill
+- [x] Actual browser tab-close/reopen preserves two queued bills in an isolated origin
+- [ ] Production Turso backup retention and staging restore verified
+- [ ] Live production payment, webhook activation and settlement accepted
+- [ ] Real Android and iPhone offline launch/restart/reconnect matrix
+- [ ] Exact 58mm printer models accepted for each supported transport/platform
+- [ ] Android fractional-quantity and Hindi receipt rendering corrected and tested
+- [ ] Signed Android release configuration and physical install/update accepted
+- [ ] Owner A / Owner B / Staff isolation independently verified across all routes
+- [ ] Resolve and verify historical credential revocation recorded in SECURITY-REVIEW.md
+- [ ] Refund/dispute process, alerts, support ownership and rollback drill
+- [ ] Load/slow-network tests and service availability targets agreed
+- [ ] Controlled 3-5 shop pilot for 7-14 days with daily reconciliation
 
-## Billing & offline
-- [ ] Offline customer/product/bill -> sync passes.
-- [ ] Duplicate client_invoice_id retry creates one invoice only.
-- [ ] Printer failure never removes a bill.
-- [ ] Stock restore/cancel/refund/partial-payment flows verified.
-
-## Android release
-- [ ] Increment versionCode/versionName for every distributed APK.
-- [ ] API min/recommended Android versions reviewed.
-- [ ] Release APK tested on a real Android phone.
-- [ ] 58mm/80mm printers tested on actual target hardware before claiming compatibility.
-
-## Payments
-- [ ] Cashfree remains sandbox until merchant onboarding/KYC is complete.
-- [ ] Webhook signature and duplicate-event tests pass before production payments.
-- [ ] Payment activation is server/webhook verified, never client-success only.
-
-## Observability
-- [ ] /api/health = ok.
-- [ ] /api/health/ready = database ok.
-- [ ] /api/health/release shows expected version/environment.
-- [ ] /status loads against deployed API.
-- [ ] Request IDs appear in API error responses/logs.
-
-## Final gate
-```powershell
-npx pnpm@11.24.0 release:check:prod
-```
-
-After Cashfree production credentials are configured:
-```powershell
-npx pnpm@11.24.0 release:check:prod-payments
-```
+Pass criteria: no missing/duplicate invoices or double deductions, monetary totals reconcile, rejected sync conflicts retain recoverable drafts, printer failures preserve bills, no tenant leakage, and a successful restore drill. Do not interpret a sandbox test or automated test suite as public-release certification.

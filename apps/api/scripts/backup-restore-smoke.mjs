@@ -1,0 +1,40 @@
+import assert from 'node:assert/strict';
+import {mkdtemp,copyFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {pathToFileURL,fileURLToPath} from 'node:url';
+import {createRequire} from 'node:module';
+import {createClient} from '@libsql/client';
+import {applyMigrations} from './db-migrate.mjs';
+const require=createRequire(import.meta.url);
+const {PosService}=require('../dist/pos/pos.service.js');
+const dir=await mkdtemp(join(tmpdir(),'brandspire-restore-'));
+const source=join(dir,'source.db'),backup=join(dir,'backup.db'),restored=join(dir,'restored.db');
+let client=createClient({url:pathToFileURL(source).href});
+const db={execute:(sql,args=[])=>client.execute({sql,args}),async transaction(work){const tx=await client.transaction('write');try{const result=await work(tx);await tx.commit();return result;}catch(e){await tx.rollback();throw e;}finally{tx.close();}}};
+const metrics=async()=>{
+ const result={};
+ for(const table of ['organizations','products','invoices','invoice_items','payments','inventory_movements','schema_migrations']) result[table]=(await db.execute(`SELECT * FROM ${table} ORDER BY rowid`)).rows;
+ return JSON.parse(JSON.stringify(result));
+};
+try{
+ await applyMigrations(client,fileURLToPath(new URL('../migrations',import.meta.url)));
+ await db.execute("INSERT INTO user_profiles(firebase_uid,email) VALUES ('owner','test@example.test')");
+ await db.execute("INSERT INTO organizations(id,name,slug,owner_user_id) VALUES ('org','Restore Drill','restore-drill','owner')");
+ await db.execute("INSERT INTO organization_settings(organization_id) VALUES ('org')");
+ const service=new PosService(db);
+ const productId=await service.createProduct('org','owner',{name:'Rice',selling_price:50,stock:20,tax_rate:0});
+ const input={clientInvoiceId:'5b26c880-61c8-489f-ab0f-10c01a8c96c4',items:[{productId,quantity:2}]};
+ const bill=await service.createInvoice('org','owner','OWNER',input);
+ const expected=await metrics();
+ await db.execute('PRAGMA wal_checkpoint(TRUNCATE)');
+ client.close();
+ await copyFile(source,backup);await copyFile(backup,restored);
+ client=createClient({url:pathToFileURL(restored).href});
+ assert.equal((await db.execute('PRAGMA integrity_check')).rows[0].integrity_check,'ok');
+ assert.equal((await db.execute('PRAGMA foreign_key_check')).rows.length,0);
+ assert.deepEqual(await metrics(),expected);
+ assert.deepEqual(await new PosService(db).createInvoice('org','owner','OWNER',input),bill);
+ assert.deepEqual(await metrics(),expected,'Retry after restore cannot duplicate bill, payment or stock deduction');
+ console.log('PASS local backup restore: closed database copy, integrity, foreign keys, exact records, stock, payment totals and invoice retry after reopen. Production Turso backup and disaster recovery remain unverified.');
+}finally{client.close();}
