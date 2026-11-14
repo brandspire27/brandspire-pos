@@ -36,3 +36,18 @@ node apps/api/scripts/cashfree-webhook-http-smoke.mjs
 ```
 
 Reference: https://www.cashfree.com/docs/payments/online/webhooks/troubleshooting
+
+## Subsequent real sandbox acceptance — 14 November
+
+Using `scripts/cashfree-sandbox-browser.mjs`, existing TEST credentials, the compiled production payment service code, and a separate in-memory database:
+
+- Cashfree hosted sandbox checkout opened for INR 399.
+- TEST Bank SUCCESS returned to the local merchant page. Real sandbox order/payment API verification returned PAID / verified true; exactly one ACTIVE subscription and one INR 399 SUCCESS transaction were saved locally.
+- Repeat verification left the transaction count at one and expiry unchanged (2026-12-14T04:26:15.350Z).
+- A second order using TEST Bank FAILED / Bank Decline returned verified false (Cashfree order status ACTIVE means the order remains open, not that payment succeeded). No second transaction or access extension occurred.
+- No real funds moved and no production records/settings changed. The local harness omits notify_url because localhost is not reachable from Cashfree; this run verifies checkout/return/server-side reconciliation, not delivery of an actual payment webhook into the live deployment. User separately confirmed the live dashboard webhook probe succeeded.
+- This supersedes the earlier 'sandbox browser untested' limitation for this narrow TEST Bank scenario only. Production settlement, other payment methods and refunds remain unverified.
+
+Run from apps/api after building: `node --env-file=.env scripts/cashfree-sandbox-browser.mjs`. Requires CASHFREE_ENV=sandbox and a TEST client ID. Stop after testing; its database is intentionally ephemeral.
+
+Test instruments reference: https://www.cashfree.com/docs/api-reference/payments/data-to-test-integration

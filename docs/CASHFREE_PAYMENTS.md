@@ -22,6 +22,12 @@ Renewals preserve remaining active/trial/grace days and add 1, 6 or 12 calendar 
 
 Approved Basic pricing (13 November 2026): INR 399/month, INR 1799/6 months, INR 3499/year. Migration 0005 adds half_yearly_price and term_months. Purchased term_months is saved before checkout and governs access duration; the legacy MONTHLY/YEARLY column retains its interval unit for old readers. Existing sessions without term_months use their original cycle. Prices are configured in the live catalog, not overwritten by migrations.
 
+## Recovery worker and checkout reuse
+
+Apply migration `0006_payment_recovery` before deploying the recovery worker. New pending checkouts with the same owner, organization, plan, duration, price, currency and environment reuse one reservation under a database write transaction. If the provider response is lost, the exact saved request and idempotency key are retried. An expired/terminated provider order closes its reservation; the next user retry creates a new order. Existing legacy sessions without a saved request payload remain recoverable but cannot replay order creation.
+
+While the API is running, recovery starts on boot and checks up to ten eligible pending orders each minute. A durable five-minute lease prevents overlapping workers from repeatedly querying the same order. Failures stay eligible for later recovery. It performs only provider status checks and local reconciliation, never initiates a payment. On Render free-tier sleep, the worker also sleeps and resumes on wake-up; this is not an always-on scheduler. Logs expose aggregate checked/recovered/failed counts without customer or payment secrets. Unknown/uncreated orders remain pending for investigation and retry.
+
 ## Local regression
 
 Build the API, then run `node apps/api/scripts/cashfree-orders-smoke.mjs`. The suite uses an in-memory database and mocked Cashfree responses; it never charges or contacts a customer. Coverage includes ownership, pending/failed payments, mismatched amount/currency, rollback, retry, duplicate delivery, renewal dates, provider outage and production/sandbox isolation. A real hosted checkout acceptance test is still required.

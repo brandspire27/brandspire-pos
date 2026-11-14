@@ -11,8 +11,8 @@ const client=createClient({url:'file::memory:'});
 let failWrite=false;
 const database={execute:(sql,args=[])=>client.execute({sql,args}),async transaction(work){const tx=await client.transaction('write');try{const out=await work({execute:async query=>{if(failWrite&&query.sql.includes('INSERT INTO payment_transactions'))throw Error('simulated disk failure');return tx.execute(query);}});await tx.commit();return out;}catch(e){await tx.rollback();throw e;}finally{tx.close();}}};
 let status='ACTIVE',amount=100,currency='INR',paymentStatus='SUCCESS',providerDown=false;
-let requests=[];
-const provider={isConfigured:()=>true,getEnvironment:()=> 'sandbox',request:async(path,init)=>{requests.push(path);if(providerDown)throw Error('provider unavailable');if(init){const body=JSON.parse(init.body);assert.equal(body.order_amount,amount);return {order_id:body.order_id,payment_session_id:'session_'+body.order_id};}const orderId=path.split('/')[2];return path.endsWith('/payments')?[{cf_payment_id:'pay_'+orderId,payment_status:paymentStatus,payment_amount:amount,payment_currency:currency,payment_time:'2026-11-13T00:00:00Z'}]:{order_id:orderId,order_status:status,order_amount:amount,order_currency:currency};}};
+let requests=[], createRequests=[], loseCreateResponse=false;
+const provider={isConfigured:()=>true,getEnvironment:()=> 'sandbox',request:async(path,init)=>{requests.push(path);if(providerDown)throw Error('provider unavailable');if(init){const body=JSON.parse(init.body);createRequests.push({key:init.headers['x-idempotency-key'],body:init.body});if(loseCreateResponse){loseCreateResponse=false;throw Error('lost create response');}assert.equal(body.order_amount,amount);return {order_id:body.order_id,payment_session_id:'session_'+body.order_id};}const orderId=path.split('/')[2];return path.endsWith('/payments')?[{cf_payment_id:'pay_'+orderId,payment_status:paymentStatus,payment_amount:amount,payment_currency:currency,payment_time:'2026-11-13T00:00:00Z'}]:{order_id:orderId,order_status:status,order_amount:amount,order_currency:currency};}};
 try{
  await applyMigrations(client,fileURLToPath(new URL('../migrations',import.meta.url)));
  await database.execute("INSERT INTO user_profiles(firebase_uid,email) VALUES ('owner','owner@example.test')");
@@ -21,6 +21,9 @@ try{
  const service=new CashfreeOrdersService(database,provider);
  const checkout=await service.checkout('org','owner','owner@example.test','plan','MONTHLY');
  const order=checkout.orderId;
+ const duplicate=await service.checkout('org','owner','owner@example.test','plan','MONTHLY');
+ assert.equal(duplicate.orderId,order,'Repeated checkout reuses the existing provider order');
+ assert.equal((await database.execute('SELECT count(*) AS n FROM subscription_checkout_sessions')).rows[0].n,1);
  await assert.rejects(service.verify('other','owner',order),/not found/);
  assert.equal((await service.verify('org','owner',order)).verified,false);
  assert.equal((await database.execute('SELECT count(*) AS n FROM subscriptions')).rows[0].n,0);
@@ -87,11 +90,33 @@ try{
  await database.execute("UPDATE subscription_checkout_sessions SET metadata=? WHERE provider_order_id=?",[JSON.stringify({mode:'production'}),wrongMode.orderId]);
  await assert.rejects(service.verify('org','owner',wrongMode.orderId),/environment does not match/);
  const testOrder=await service.checkout('org','owner','owner@example.test','plan','MONTHLY');
+ providerDown=true;
+ const failedRecovery=await service.recoverPending();
+ assert.ok(failedRecovery.failed>=1);
+ providerDown=false;
+ await database.execute('UPDATE subscription_checkout_sessions SET last_reconciled_at=NULL WHERE provider_order_id=?',[testOrder.orderId]);
+ const recovered=await service.recoverPending();
+ assert.ok(recovered.recovered>=1,'Worker recovers payment with no redirect or webhook');
+ const recoveryCount=Number((await database.execute('SELECT count(*) AS n FROM payment_transactions')).rows[0].n);
+ await service.recoverPending();
+ assert.equal(Number((await database.execute('SELECT count(*) AS n FROM payment_transactions')).rows[0].n),recoveryCount);
+ // Exact provider request/key survives an ambiguous creation timeout.
+ loseCreateResponse=true;
+ await assert.rejects(service.checkout('org','owner','owner@example.test','plan','MONTHLY'),/lost create response/);
+ const lostRequest=createRequests.at(-1);
+ const resumed=await service.checkout('org','owner','owner@example.test','plan','MONTHLY');
+ assert.deepEqual(createRequests.at(-1),lostRequest);
+ assert.equal(resumed.orderId,JSON.parse(lostRequest.body).order_id);
+ // Provider expiry closes the reservation; a later retry can start a new order.
+ status='EXPIRED';
+ await assert.rejects(service.checkout('org','owner','owner@example.test','plan','MONTHLY'),/checkout has closed/);
+ status='PAID';
+ const sandboxOnlyOrder=await service.checkout('org','owner','owner@example.test','plan','MONTHLY');
  require('../dist/config/runtime-config.js').getRuntimeConfig().appEnv='production';
  const before=(await database.execute('SELECT count(*) AS n FROM subscriptions')).rows[0].n;
- assert.equal((await service.verify('org','owner',testOrder.orderId)).providerStatus,'TEST_PAYMENT_SUCCESS');
+ assert.equal((await service.verify('org','owner',sandboxOnlyOrder.orderId)).providerStatus,'TEST_PAYMENT_SUCCESS');
  assert.equal((await database.execute('SELECT count(*) AS n FROM subscriptions')).rows[0].n,before);
  process.env.CASHFREE_CLIENT_SECRET='test-secret';const verifier=new CashfreeService(database);
  assert.equal(verifier.verifyWebhookSignature(body,'123','forged'),false);
- console.log('Cashfree PG passed: ownership, pending/failed, amount/currency, atomic rollback, failed webhook retry, duplicates, renewal carryover, calendar dates, legacy mandate ignored, signature rejection.');
+ console.log('Cashfree PG passed: ownership, pending/failed, amount/currency, atomic rollback, failed webhook retry, duplicates, renewal carryover, calendar dates, legacy mandate ignored, signature rejection, checkout reuse, lost-response replay, background recovery.');
 }finally{client.close();}

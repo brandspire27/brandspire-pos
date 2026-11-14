@@ -27,22 +27,35 @@ export class CashfreeOrdersService {
     const phone = String(org.phone ?? '').replace(/\D/g, '').slice(-10);
     if (!/^[6-9]\d{9}$/.test(phone)) throw new BadRequestException('Add a valid business mobile number first.');
     if (!config.publicApiUrl) throw new BadRequestException('Public backend URL is missing.');
-    // Record before the provider call, so an early webhook or a lost response remains recoverable.
-    const id = randomUUID();
-    const orderId = `bsp_${id.replace(/-/g, '')}`;
-    // Legacy cycle CHECK allows MONTHLY/YEARLY only. term_months is the
-    // authoritative purchased duration; six months is six monthly intervals.
-    await this.database.execute(`INSERT INTO subscription_checkout_sessions
-      (id,organization_id,created_by,plan_id,billing_cycle,amount,currency,provider,provider_order_id,metadata,term_months)
-      VALUES (?,?,?,?,?,?,?,'CASHFREE_PG',?,?,?)`,
-      [id,organizationId,ownerId,planId,cycle === 'YEARLY' ? 'YEARLY' : 'MONTHLY',amount,String(plan.currency),orderId,JSON.stringify({mode:this.cashfree.getEnvironment()}),termMonths]);
-    const order = await this.cashfree.request<Order>('/orders', {method:'POST',headers:{'x-idempotency-key':id},body:JSON.stringify({
-      order_id:orderId,order_amount:amount,order_currency:plan.currency,
-      customer_details:{customer_id:organizationId,customer_name:org.name,customer_email:email,customer_phone:phone},
-      order_meta:{return_url:`${config.webOrigins[0]}/owner/subscription?cashfree_order_id=${orderId}`,
-        notify_url:`${config.publicApiUrl}/api/payments/cashfree/webhook`},
-      order_note:`BrandSpire ${String(plan.name)} ${cycle} - one-time payment`
-    })});
+    // Reserve under a write transaction: concurrent tabs share one unpaid order.
+    const reserved = await this.database.transaction(async tx => {
+      const existing = (await tx.execute({sql:`SELECT * FROM subscription_checkout_sessions
+        WHERE provider='CASHFREE_PG' AND status='CREATED' AND organization_id=? AND created_by=?
+        AND plan_id=? AND term_months=? AND amount=? AND currency=? AND json_extract(metadata,'$.mode')=?
+        ORDER BY created_at DESC LIMIT 1`,args:[organizationId,ownerId,planId,termMonths,amount,String(plan.currency),this.cashfree.getEnvironment()]})).rows[0];
+      if (existing?.request_payload) return {id:String(existing.id),provider_order_id:String(existing.provider_order_id),request_payload:String(existing.request_payload),provider_session_id:existing.provider_session_id ? String(existing.provider_session_id) : null,reused:true};
+      const id = randomUUID();
+      const orderId = `bsp_${id.replace(/-/g, '')}`;
+      const payload = JSON.stringify({order_id:orderId,order_amount:amount,order_currency:plan.currency,
+        customer_details:{customer_id:organizationId,customer_name:org.name,customer_email:email,customer_phone:phone},
+        order_meta:{return_url:`${config.webOrigins[0]}/owner/subscription?cashfree_order_id=${orderId}`,
+          notify_url:`${config.publicApiUrl}/api/payments/cashfree/webhook`},
+        order_note:`BrandSpire ${String(plan.name)} ${cycle} - one-time payment`});
+      await tx.execute({sql:`INSERT INTO subscription_checkout_sessions
+        (id,organization_id,created_by,plan_id,billing_cycle,amount,currency,provider,provider_order_id,metadata,term_months,request_payload)
+        VALUES (?,?,?,?,?,?,?,'CASHFREE_PG',?,?,?,?)`,
+        args:[id,organizationId,ownerId,planId,cycle === 'YEARLY' ? 'YEARLY' : 'MONTHLY',amount,String(plan.currency),orderId,JSON.stringify({mode:this.cashfree.getEnvironment()}),termMonths,payload]});
+      return {id,provider_order_id:orderId,request_payload:payload,provider_session_id:null,reused:false};
+    });
+    const id=String(reserved.id), orderId=String(reserved.provider_order_id);
+    if (reserved.reused && reserved.provider_session_id) {
+      const result=await this.reconcile(orderId);
+      if (result.verified || result.providerStatus==='TEST_PAYMENT_SUCCESS') throw new BadRequestException('This payment is already confirmed. Refresh your subscription; do not pay again.');
+      if (['EXPIRED','TERMINATED','TERMINATION_REQUESTED'].includes(result.providerStatus)) throw new BadRequestException('Previous checkout has closed. Please try again to start a fresh checkout.');
+      return {sessionId:id,orderId,paymentSessionId:String(reserved.provider_session_id),amount,currency:plan.currency,billingCycle:cycle};
+    }
+    // Replay the exact payload/key after a lost provider response.
+    const order = await this.cashfree.request<Order>('/orders', {method:'POST',headers:{'x-idempotency-key':id},body:String(reserved.request_payload)});
     if (!order.payment_session_id || order.order_id !== orderId) throw new BadGatewayException('Cashfree checkout could not be prepared.');
     await this.database.execute('UPDATE subscription_checkout_sessions SET provider_session_id = ? WHERE id = ?', [order.payment_session_id,id]);
     return {sessionId:id,orderId,paymentSessionId:order.payment_session_id,amount,currency:plan.currency,billingCycle:cycle};
@@ -56,6 +69,27 @@ export class CashfreeOrdersService {
     return this.reconcile(orderId);
   }
 
+  async recoverPending() {
+    if (!this.cashfree.isConfigured()) return {checked:0,recovered:0,failed:0};
+    const cutoff=new Date(Date.now()-5*60*1000).toISOString();
+    const rows=(await this.database.execute(`SELECT id,provider_order_id FROM subscription_checkout_sessions
+      WHERE provider='CASHFREE_PG' AND status='CREATED' AND provider_order_id IS NOT NULL
+      AND json_extract(metadata,'$.mode')=? AND (last_reconciled_at IS NULL OR last_reconciled_at<?)
+      ORDER BY COALESCE(last_reconciled_at,created_at),created_at LIMIT 10`,[this.cashfree.getEnvironment(),cutoff])).rows;
+    const summary={checked:0,recovered:0,failed:0};
+    for (const row of rows) {
+      // Durable lease prevents multiple API instances polling the same order together.
+      const claim=await this.database.execute(`UPDATE subscription_checkout_sessions SET last_reconciled_at=?
+        WHERE id=? AND status='CREATED' AND (last_reconciled_at IS NULL OR last_reconciled_at<?)`,
+        [new Date().toISOString(),row.id,cutoff]);
+      if (!claim.rowsAffected) continue;
+      summary.checked++;
+      try { if ((await this.reconcile(String(row.provider_order_id))).verified) summary.recovered++; }
+      catch { summary.failed++; } // Keep the order pending; next lease retries, with no new charge.
+    }
+    return summary;
+  }
+
   async reconcile(orderId:string) {
     const row = (await this.database.execute(`SELECT * FROM subscription_checkout_sessions WHERE provider = 'CASHFREE_PG' AND provider_order_id = ?`, [orderId])).rows[0];
     if (!row) throw new BadRequestException('Unknown payment order');
@@ -65,7 +99,11 @@ export class CashfreeOrdersService {
     const order = await this.cashfree.request<Order>(`/orders/${encodeURIComponent(orderId)}`);
     if (order.order_id !== orderId || money(order.order_amount) !== money(session.amount) || order.order_currency !== session.currency)
       throw new BadRequestException('Payment order amount or currency mismatch');
-    if (order.order_status !== 'PAID') return {verified:false,providerStatus:order.order_status};
+    if (order.order_status !== 'PAID') {
+      if (['EXPIRED','TERMINATED'].includes(order.order_status)) await this.database.execute(
+        "UPDATE subscription_checkout_sessions SET status='CLOSED' WHERE id=? AND status='CREATED'",[session.id]);
+      return {verified:false,providerStatus:order.order_status};
+    }
     const payments = await this.cashfree.request<Payment[]>(`/orders/${encodeURIComponent(orderId)}/payments`);
     const payment = payments.find(p => p.payment_status === 'SUCCESS' && money(p.payment_amount) === money(session.amount) && p.payment_currency === session.currency && p.cf_payment_id);
     if (!payment) throw new BadGatewayException('Successful payment is not confirmed yet. Please check again.');

@@ -1,0 +1,3 @@
+ALTER TABLE subscription_checkout_sessions ADD COLUMN request_payload TEXT;
+ALTER TABLE subscription_checkout_sessions ADD COLUMN last_reconciled_at TEXT;
+CREATE INDEX checkout_recovery_idx ON subscription_checkout_sessions(provider,status,last_reconciled_at);
