@@ -215,7 +215,7 @@ export default function BillingWorkspace({portal}:Props){
     }
   }
 
-  async function createBill(items=cart, fromAssistant=false){
+  async function createBill(items=cart, fromAssistant=false, printAfterSave=false){
     if(recovery){setError('Restore the saved draft before creating a new bill.');if(fromAssistant)throw new Error('Restore the saved draft first.');return;}
     if(!org||items.length===0||submitting.current){if(fromAssistant)throw new Error('Wait for the current bill to finish.');return;}
     submitting.current=true;
@@ -259,6 +259,10 @@ export default function BillingWorkspace({portal}:Props){
         const refreshed=await listProducts('',true,250);
         setProducts(refreshed.data as unknown as Product[]);
       } catch { setError('Bill saved successfully. Refresh the catalog before creating another bill.'); }
+      if (printAfterSave) {
+        // Invoice already exists; a cancelled or failed print must never create another sale.
+        router.push(`${portal==='owner'?'/owner':'/staff'}/invoice?id=${encodeURIComponent(result.invoice_id)}&autoprint=1`);
+      }
     } catch (reason) {
       setError(reason instanceof Error?reason.message:'Bill could not be created. Please check stock/network and retry.');
       if(fromAssistant)throw reason;
@@ -292,7 +296,7 @@ export default function BillingWorkspace({portal}:Props){
     }}/>}
     <div className="content-head pos-page-head"><div><span className="page-kicker">{portal==='staff'?t.counterKickerStaff:t.counterKickerOwner}</span><h1>{portal==='staff'?t.counterStaffTitle:t.counterOwnerTitle}</h1><p>{t.counterSub}</p></div><div className="counter-shortcut" aria-hidden="true">↵ <span>{t.searchFocused}</span></div></div>
     {error&&<div className="form-error" role="alert">{error}</div>}
-    {success&&<div className="bill-success" role="status"><div><span>{t.billCreated}</span><h2>{success.invoiceNumber}</h2><p>{formatINR(success.total)} · {t.stockUpdated}</p></div><div className="hero-actions" style={{marginTop:0}}>{success.id&&<button className="btn btn-primary" onClick={()=>router.push(`${base}/invoice?id=${success.id}`)}>{t.viewPrint}</button>}<button className="btn" onClick={()=>setSuccess(null)}>{t.newBill}</button></div></div>}
+    {success&&<div className="bill-success" role="status"><div><span>{t.billCreated}</span><h2>{success.invoiceNumber}</h2><p>{formatINR(success.total)} · {t.stockUpdated}</p></div><div className="hero-actions" style={{marginTop:0}}>{success.id&&<button className="btn btn-primary" onClick={()=>router.push(`${base}/invoice?id=${success.id}`)}>View Receipt</button>}<button className="btn" onClick={()=>setSuccess(null)}>{t.newBill}</button></div></div>}
     <div className="billing-grid premium-counter">
       <section className="card billing-products"><div className="billing-search"><span className="search-mark" aria-hidden="true">⌕</span><input autoFocus aria-label={t.scanSearch} autoComplete="off" className="input" placeholder={t.scanSearch} value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={handleSearchKeyDown}/></div>{catalogBusy&&<div className="catalog-search-state" role="status">{searchStatus}</div>}<div className="product-picker">{filteredProducts.map(product=><button type="button" key={product.id} className="product-pick" disabled={Number(product.stock)<=0} onClick={()=>addProduct(product)}><span><strong>{product.name}</strong><small>{product.sku||product.barcode||`${Number(product.tax_rate)}% GST`}</small></span><span className="product-pick-right"><strong>{formatINR(product.selling_price)}</strong><small className={Number(product.stock)<=5?'stock-low':''}>{Number(product.stock)} {product.unit}</small></span></button>)}{filteredProducts.length===0&&!catalogBusy&&<div className="empty-state">{t.noMatchingProducts}</div>}</div></section>
       <section className="card bill-cart"><div className="bill-cart-head"><div><span className="page-kicker">{t.currentBill}</span><h2>{cart.length} {cart.length===1?t.item:t.items}</h2></div><button type="button" className="text-danger" onClick={()=>setCart([])}>{t.clear}</button></div><div className="cart-list">{cart.length===0?<div className="empty-state bill-empty"><span className="empty-receipt" aria-hidden="true">▤</span><strong>{t.startProduct}</strong><br/>{t.searchTapAdd}</div>:cart.map(item=><div className="cart-row" key={item.id}><div><strong>{item.name}</strong><small>{formatINR(item.selling_price)} · {Number(item.tax_rate)}% GST</small></div><div className="qty-control" aria-label={`${item.name} quantity`}><button type="button" aria-label={`Reduce ${item.name} quantity`} onClick={()=>setQuantity(item.id,item.quantity-1)}>-</button><QuantityInput name={item.name} value={item.quantity} stock={Number(item.stock)} onCommit={quantity=>setQuantity(item.id,quantity)}/><button type="button" aria-label={`Increase ${item.name} quantity`} onClick={()=>setQuantity(item.id,item.quantity+1)}>+</button></div><strong>{formatINR(Number(item.selling_price)*item.quantity)}</strong><button type="button" aria-label={`Remove ${item.name}`} className="cart-remove" onClick={()=>setCart(c=>c.filter(x=>x.id!==item.id))}>×</button></div>)}</div>
@@ -302,7 +306,12 @@ export default function BillingWorkspace({portal}:Props){
           <div className="field"><label>{t.amountPaid} <span className="muted">({t.amountPaidHint})</span></label><input className="input" type="number" inputMode="decimal" min="0" step="0.01" placeholder={paymentMethod==='CREDIT'?'0':estimated.total.toFixed(2)} value={amountPaid} onChange={e=>setAmountPaid(e.target.value)}/></div>
         </div>
         <div className="bill-totals"><div><span>{t.taxable}</span><strong>{formatINR(estimated.base)}</strong></div><div><span>{t.discount}</span><strong>- {formatINR(estimated.discount)}</strong></div><div><span>GST</span><strong>{formatINR(estimated.tax)}</strong></div><div className="bill-grand"><span>{t.total}</span><strong>{formatINR(estimated.total)}</strong></div></div>
-        <button className="generate-bill" disabled={creating||cart.length===0} onClick={()=>createBill()}>{creating?t.creatingBill:`${t.createBill} · ${formatINR(estimated.total)}`}</button><p className="billing-note">{t.transactionSavedFirst}</p>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(2,minmax(0,1fr))',gap:10,marginTop:15}}>
+          <button type="button" className="btn" style={{width:'100%'}} disabled={creating||cart.length===0} onClick={()=>void createBill(cart,false,false)}>{creating?t.creatingBill:'Save Only'}</button>
+          <button type="button" className="btn btn-primary" style={{width:'100%'}} disabled={creating||cart.length===0||!online||offlineLoaded} onClick={()=>void createBill(cart,false,true)}>{creating?t.creatingBill:'Save & Print'}</button>
+        </div>
+        {(!online||offlineLoaded)&&<p className="billing-note">Web printing needs an online invoice. Save Only keeps eligible offline bills queued safely.</p>}
+        <p className="billing-note">{t.transactionSavedFirst}</p>
       </section>
     </div>
   </Shell>;

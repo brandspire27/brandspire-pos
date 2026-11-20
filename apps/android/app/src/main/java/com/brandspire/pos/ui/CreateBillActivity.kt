@@ -79,7 +79,7 @@ class CreateBillActivity : Activity() {
         val scroll = ScrollView(this).apply { setBackgroundColor(LaunchColors.bg); clipToPadding = false }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(bsDp(20), bsDp(18), bsDp(20), bsDp(122))
+            setPadding(bsDp(20), bsDp(18), bsDp(20), bsDp(180))
         }
         scroll.addView(root)
         frame.addView(scroll)
@@ -165,9 +165,9 @@ class CreateBillActivity : Activity() {
         root.addView(cartList)
 
         val bottom = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
+            orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(bsDp(16), bsDp(12), bsDp(12), bsDp(12))
+            setPadding(bsDp(12), bsDp(10), bsDp(12), bsDp(10))
             background = bsRounded(Color.WHITE, 22, LaunchColors.border)
             elevation = bsDp(12).toFloat()
         }
@@ -176,9 +176,12 @@ class CreateBillActivity : Activity() {
         totalText = bsText(money(0.0), 22f, LaunchColors.ink, true).apply { setPadding(0, bsDp(2), 0, 0) }
         totalCopy.addView(itemCountText)
         totalCopy.addView(totalText)
-        bottom.addView(totalCopy, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        bottom.addView(bsPrimaryButton(tx("Save Bill", "Bill Save Karo", "बिल सेव करें")) { saveBill() }, LinearLayout.LayoutParams(bsDp(142), bsDp(52)))
-        frame.addView(bottom, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, bsDp(78), Gravity.BOTTOM).apply {
+        bottom.addView(totalCopy, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        val saveActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        saveActions.addView(bsSecondaryButton(tx("Save Only", "Sirf Save", "केवल सेव करें")) { saveBill(false) }, LinearLayout.LayoutParams(0, bsDp(48), 1f).apply { marginEnd = bsDp(5) })
+        saveActions.addView(bsPrimaryButton(tx("Save & Print", "Save aur Print", "सेव और प्रिंट")) { saveBill(true) }, LinearLayout.LayoutParams(0, bsDp(48), 1f).apply { marginStart = bsDp(5) })
+        bottom.addView(saveActions, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, bsDp(48)).apply { topMargin = bsDp(8) })
+        frame.addView(bottom, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, bsDp(132), Gravity.BOTTOM).apply {
             marginStart = bsDp(12)
             marginEnd = bsDp(12)
             bottomMargin = bsDp(10)
@@ -528,7 +531,7 @@ class CreateBillActivity : Activity() {
         (products.firstOrNull { it.id == id }?.sellingPrice ?: 0.0) * qty
     }
 
-    private fun saveBill() {
+    private fun saveBill(printAfterSave: Boolean) {
         if (cart.isEmpty()) {
             Toast.makeText(this, tx("Add at least one product", "Kam se kam ek product add karo", "कम से कम एक उत्पाद जोड़ें"), Toast.LENGTH_SHORT).show()
             return
@@ -577,6 +580,7 @@ class CreateBillActivity : Activity() {
         if (isOnline()) SyncScheduler.syncNow(this)
         startActivity(Intent(this, BillSuccessActivity::class.java).apply {
             putExtra("client_invoice_id", clientId)
+            putExtra("print_after_save", printAfterSave)
             putExtra("organization_id", organizationId)
             putExtra("language", language)
         })

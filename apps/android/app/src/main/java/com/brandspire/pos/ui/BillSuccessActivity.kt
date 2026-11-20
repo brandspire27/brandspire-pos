@@ -30,6 +30,7 @@ class BillSuccessActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        autoPrintAttempted = savedInstanceState?.getBoolean("auto_print_attempted", false) ?: false
         bsApplyWindowChrome()
         language = MobileText.language(intent.getStringExtra("language"))
         val clientId = intent.getStringExtra("client_invoice_id").orEmpty()
@@ -43,13 +44,18 @@ class BillSuccessActivity : Activity() {
         render()
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean("auto_print_attempted", autoPrintAttempted)
+        super.onSaveInstanceState(outState)
+    }
+
     override fun onResume() {
         super.onResume()
         if (::bill.isInitialized) {
             OfflineDatabase(this).localBill(bill.clientInvoiceId)?.let { bill = it }
             if (!autoPrintAttempted) {
                 autoPrintAttempted = true
-                if (PrinterPreferences(this).read()?.autoPrint == true) printDefault(false)
+                if (intent.getBooleanExtra("print_after_save", false)) printDefault(true)
             }
         }
     }
@@ -131,7 +137,7 @@ class BillSuccessActivity : Activity() {
         root.addView(bsInfoRow(
             "⚙",
             tx("Printer Setup", "Printer Setup", "प्रिंटर सेटअप"),
-            tx("Change default printer, paper size or auto-print.", "Default printer, paper size ya auto-print change karo.", "डिफ़ॉल्ट प्रिंटर, पेपर साइज़ या ऑटो-प्रिंट बदलें।")
+            tx("Change default printer or paper size.", "Default printer ya paper size badlo.", "डिफ़ॉल्ट प्रिंटर या पेपर साइज़ बदलें।")
         ) {
             startActivity(Intent(this, PrinterSetupActivity::class.java).apply { putExtra("language", language) })
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = bsDp(8) })

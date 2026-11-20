@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import OwnerShell from '@/components/pos/OwnerShell';
 import StaffShell from '@/components/pos/StaffShell';
@@ -39,6 +39,7 @@ export default function InvoiceDetailView({ invoiceId, portal }:Props){
   const [cancelMode,setCancelMode]=useState(false);
   const [cancelReason,setCancelReason]=useState('');
   const [cancelling,setCancelling]=useState(false);
+  const autoPrintTriggered=useRef(false);
 
   const load=useCallback(async()=>{
     setLoading(true);setError('');
@@ -68,6 +69,21 @@ export default function InvoiceDetailView({ invoiceId, portal }:Props){
   },[invoiceId,portal,router]);
 
   useEffect(()=>{void load();},[load]);
+
+  useEffect(()=>{
+    if(loading||!invoice||!business||autoPrintTriggered.current)return;
+    if(new URLSearchParams(window.location.search).get('autoprint')!=='1')return;
+    // Print only after the invoice and receipt layout are ready. Keep the manual Print button as fallback.
+    const timer=window.setTimeout(()=>{
+      if(autoPrintTriggered.current)return;
+      autoPrintTriggered.current=true;
+      const url=new URL(window.location.href);
+      url.searchParams.delete('autoprint');
+      window.history.replaceState(window.history.state,'',url.toString());
+      window.print();
+    },600);
+    return ()=>window.clearTimeout(timer);
+  },[loading,invoice,business]);
 
   if(loading||!org)return <WorkspaceLoader/>;
   if(error||!invoice||!business)return <main className="auth-wrap"><div className="card auth-card narrow"><div className="form-error">{error||'Invoice not found.'}</div></div></main>;

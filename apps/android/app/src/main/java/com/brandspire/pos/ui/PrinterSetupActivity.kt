@@ -35,7 +35,6 @@ class PrinterSetupActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var language: String
     private lateinit var prefs: PrinterPreferences
-    private lateinit var autoPrintLabel: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -83,21 +82,13 @@ class PrinterSetupActivity : Activity() {
         root.addView(defaultCard, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = bsDp(16) })
 
         root.addView(bsSection(tx("Printing behaviour", "Printing behaviour", "प्रिंटिंग व्यवहार")))
-        val autoCard = bsInfoRow(
-            "A",
-            tx("Auto-print after bill", "Bill ke baad auto-print", "बिल के बाद ऑटो-प्रिंट"),
-            tx("Automatically print using the saved default printer.", "Saved default printer se automatically print hoga.", "सेव किए गए डिफ़ॉल्ट प्रिंटर से स्वतः प्रिंट होगा।")
-        )
-        autoPrintLabel = bsNeutralPill(if (saved?.autoPrint == true) "ON" else "OFF")
-        autoCard.addView(autoPrintLabel)
-        autoCard.setOnClickListener {
-            val next = !(prefs.read()?.autoPrint ?: false)
-            prefs.setAutoPrint(next)
-            autoPrintLabel.text = if (next) "ON" else "OFF"
-            autoPrintLabel.setTextColor(if (next) LaunchColors.green else LaunchColors.muted)
-            autoPrintLabel.background = bsRounded(if (next) LaunchColors.softGreen else Color.rgb(241, 245, 249), 99)
-        }
-        root.addView(autoCard)
+        root.addView(bsInfoRow(
+            "P",
+            tx("Choose at checkout", "Checkout par choose karo", "चेकआउट पर चुनें"),
+            tx("Use Save Only or Save & Print when creating a bill.",
+                "Bill banate waqt Save Only ya Save & Print choose karo.",
+                "बिल बनाते समय केवल सेव करें या सेव और प्रिंट चुनें।")
+        ))
 
         status = bsText("", 11.5f, LaunchColors.muted).apply { setPadding(bsDp(2), bsDp(14), bsDp(2), 0) }
         root.addView(status)
