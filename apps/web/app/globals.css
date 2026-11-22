@@ -1393,3 +1393,16 @@ button { min-height: 44px; }
 
 
 .subscription-plan-grid{grid-template-columns:1fr}.plan-price-row{grid-template-columns:repeat(3,minmax(0,1fr))}@media(max-width:640px){.plan-price-row{grid-template-columns:1fr}}
+
+/* Simple checkout keeps totals, permissions and recovery controls visible. */
+.simple-mode-switch { margin-bottom: 16px; }
+.simple-billing-guide { margin-bottom: 16px; }
+.simple-billing-guide ol { display: flex; flex-wrap: wrap; gap: 16px 40px; padding-left: 24px; font-size: 20px; font-weight: 700; }
+.simple-billing-guide .btn { margin: 4px 8px 4px 0; }
+.simple-billing-mode button, .simple-billing-mode input, .simple-billing-mode select { min-height: 48px; }
+.simple-billing-mode .product-pick { min-height: 88px; font-size: 20px; }
+.simple-billing-mode .product-pick small { font-size: 15px; color: #475569; }
+.simple-billing-mode .qty-control button { min-width: 48px; }
+.simple-billing-mode .bill-grand { font-size: 26px; }
+.simple-billing-mode :focus-visible { outline: 3px solid #1d4ed8; outline-offset: 3px; }
+@media(max-width: 600px) { .simple-billing-mode .billing-grid { display: block; } .simple-billing-mode .product-picker { max-height: 320px; } }

@@ -1,0 +1,91 @@
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+
+const MAX_DATA_LENGTH = 2_790_000;
+
+async function canvasPhoto(canvas: HTMLCanvasElement) {
+  for (const quality of [0.94, 0.86, 0.76, 0.66]) {
+    const data = canvas.toDataURL('image/jpeg', quality);
+    if (data.length <= MAX_DATA_LENGTH) return data;
+  }
+  throw new Error('Photo is too detailed. Take two closer photos of separate parts of the list.');
+}
+
+export default function ProductPhotoInput({ disabled, hindi, onPhoto, onError }: {
+  disabled: boolean; hindi: boolean; onPhoto: (data: string) => void; onError: (message: string) => void;
+}) {
+  const video = useRef<HTMLVideoElement>(null);
+  const stream = useRef<MediaStream | null>(null);
+  const mounted = useRef(true);
+  const request = useRef(0);
+  const [camera, setCamera] = useState(false);
+  const [working, setWorking] = useState(false);
+
+  function stop() {
+    request.current += 1;
+    stream.current?.getTracks().forEach(track => track.stop());
+    stream.current = null; setCamera(false); setWorking(false);
+  }
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; request.current += 1; stream.current?.getTracks().forEach(track => track.stop()); };
+  }, []);
+  useEffect(() => {
+    if (camera && video.current && stream.current) {
+      video.current.srcObject = stream.current;
+      void video.current.play().catch(() => onError('Tap the camera preview to start it.'));
+    }
+  }, [camera]);
+
+  async function start() {
+    if (working || disabled) return;
+    if (!navigator.mediaDevices?.getUserMedia) { onError('Camera preview is unavailable here. Use Take photo on your phone, or choose a photo.'); return; }
+    const id = ++request.current; setWorking(true); onError('');
+    try {
+      const media = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 2560 }, height: { ideal: 1920 } }, audio: false });
+      if (!mounted.current || id !== request.current) { media.getTracks().forEach(track => track.stop()); return; }
+      stream.current = media; setCamera(true);
+    } catch { if (mounted.current) onError('Camera could not open. Allow camera permission, or use Take photo / Choose file below.'); }
+    finally { if (mounted.current) setWorking(false); }
+  }
+  async function capture() {
+    const source = video.current;
+    if (!source?.videoWidth || !source.videoHeight) { onError('Camera is starting. Wait a moment, then capture.'); return; }
+    setWorking(true);
+    try {
+      const canvas = document.createElement('canvas');
+      const scale = Math.min(1, 2560 / Math.max(source.videoWidth, source.videoHeight));
+      canvas.width = Math.round(source.videoWidth * scale); canvas.height = Math.round(source.videoHeight * scale);
+      const context = canvas.getContext('2d'); if (!context) throw Error('Could not capture photo.');
+      context.drawImage(source, 0, 0, canvas.width, canvas.height);
+      const data = await canvasPhoto(canvas); stop(); onPhoto(data);
+    } catch (error) { onError(error instanceof Error ? error.message : 'Could not capture photo.'); setWorking(false); }
+  }
+  async function read(file?: File) {
+    if (!file) return;
+    stop(); onError(''); setWorking(true);
+    let url: string | undefined;
+    try {
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 20 * 1024 * 1024) throw Error('Choose a JPEG, PNG or WebP photo up to 20 MB.');
+      url = URL.createObjectURL(file);
+      const image = new Image(); image.src = url; await image.decode();
+      const scale = Math.min(1, 2560 / Math.max(image.naturalWidth, image.naturalHeight));
+      const canvas = document.createElement('canvas'); canvas.width = Math.round(image.naturalWidth * scale); canvas.height = Math.round(image.naturalHeight * scale);
+      const context = canvas.getContext('2d'); if (!context) throw Error('Could not read photo.');
+      context.fillStyle = 'white'; context.fillRect(0, 0, canvas.width, canvas.height); context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      const data = await canvasPhoto(canvas); if (mounted.current) onPhoto(data);
+    } catch (error) { if (mounted.current) onError(error instanceof Error ? error.message : 'Could not read photo.'); }
+    finally { if (url) URL.revokeObjectURL(url); if (mounted.current) setWorking(false); }
+  }
+  return <div className="field">
+    <div className="inline-actions"><button type="button" className="btn" disabled={disabled || working} onClick={() => void start()}>{hindi ? '📷 कैमरा खोलें' : 'Open camera'}</button>
+      <label>{hindi ? 'फोन से फोटो लें' : 'Take photo on phone'}<input aria-label="Take photo on phone" type="file" capture="environment" accept="image/jpeg,image/png,image/webp" disabled={disabled || working} onChange={event => { void read(event.target.files?.[0]); event.target.value = ''; }} /></label>
+      <label>{hindi ? 'फोटो चुनें' : 'Choose photo'}<input aria-label="Choose product photo" type="file" accept="image/jpeg,image/png,image/webp" disabled={disabled || working} onChange={event => { void read(event.target.files?.[0]); event.target.value = ''; }} /></label>
+    </div>
+    {camera && <div><video ref={video} muted autoPlay playsInline aria-label="Product camera preview" onClick={() => void video.current?.play()} style={{ width: '100%', maxHeight: 360, objectFit: 'contain', background: '#111' }} />
+      <button type="button" className="btn btn-primary" disabled={working || disabled} onClick={() => void capture()}>{hindi ? 'फोटो लें' : 'Capture photo'}</button>
+      <button type="button" className="btn" onClick={stop}>{hindi ? 'कैमरा बंद करें' : 'Close camera'}</button></div>}
+    {working && <p role="status">{hindi ? 'फोटो तैयार हो रही है…' : 'Preparing camera/photo…'}</p>}
+  </div>;
+}

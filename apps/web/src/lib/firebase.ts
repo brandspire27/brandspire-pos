@@ -40,7 +40,7 @@ export async function authenticatedApiRequest<T>(path: string, init?: RequestIni
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     const message = body?.message ?? body?.error?.message ?? 'Brandspire POS request failed';
-    throw new Error(Array.isArray(message) ? message[0] : message);
+    throw Object.assign(new Error(Array.isArray(message) ? message[0] : message), { status: response.status });
   }
   return body as T;
 }

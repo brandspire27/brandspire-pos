@@ -14,9 +14,10 @@
   "dependencies": {
     "@hookform/resolvers": "latest",
     "@tanstack/react-query": "latest",
+    "@zxing/browser": "0.1.5",
     "firebase": "latest",
     "jspdf": "^3.0.2",
-    "next": "latest",
+    "next": "16.4.6",
     "react": "latest",
     "react-dom": "latest",
     "react-hook-form": "latest",

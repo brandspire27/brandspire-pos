@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { printSc03Receipt, consumeSc03Print, getSc03Speed, setSc03Speed, type Sc03Speed } from '@/lib/sc03-printer';
 import { useRouter } from 'next/navigation';
 import OwnerShell from '@/components/pos/OwnerShell';
 import StaffShell from '@/components/pos/StaffShell';
@@ -19,10 +20,27 @@ type Invoice = {
   cancellation_reason:string|null; cancelled_at:string|null; customers:Customer;
 };
 type Item = { id:string; product_name_snapshot:string; hsn_sac_snapshot:string|null; unit_snapshot:string; quantity:number; unit_price:number; tax_rate:number; taxable_amount:number; cgst:number; sgst:number; igst:number; line_total:number };
-type Payment = { id:string; amount:number; method:string; status:string; note:string|null; created_at:string };
+type Payment = { payment_kind?:'COLLECTION'|'REFUND'; id:string; amount:number; method:string; status:string; note:string|null; created_at:string };
 type Business = { name:string; phone:string|null; email:string|null; address:string|null; state:string|null; gstin:string|null };
 type PrintSettings = { receiptHeader:string; receiptFooter:string; invoiceFooter:string; showGstin:boolean };
 type Props = { invoiceId:string; portal:'owner'|'staff' };
+
+function miniReceiptLines(invoice:Invoice,items:Item[],business:Business): string[] {
+  const money=(n:number)=>'Rs.'+Number(n).toFixed(2);
+  return [business.name,invoice.invoice_number,formatDateTime(invoice.created_at),
+    ...(invoice.status==='CANCELLED'?['CANCELLED']:[]),
+    invoice.customers?.name||'Walk-in Customer',
+    ...(invoice.customers?.phone?[invoice.customers.phone]:[]),
+    '--------------------------',
+    ...items.flatMap(item=>[item.product_name_snapshot,`${Number(item.quantity)} x ${money(item.unit_price)} = ${money(item.line_total)}`]),
+    '--------------------------',
+    'Discount: '+money(invoice.discount_amount),
+    'GST: '+money(Number(invoice.cgst)+Number(invoice.sgst)+Number(invoice.igst)),
+    'TOTAL: '+money(invoice.grand_total),
+    'Paid: '+money(invoice.amount_paid),'Due: '+money(invoice.amount_due),
+    'Status: '+invoice.payment_status,'Thank you!'];
+}
+
 
 export default function InvoiceDetailView({ invoiceId, portal }:Props){
   const router=useRouter();
@@ -36,10 +54,14 @@ export default function InvoiceDetailView({ invoiceId, portal }:Props){
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState('');
   const [shareStatus,setShareStatus]=useState('');
+  const [miniPrinting,setMiniPrinting]=useState(false);
+  const [miniStatus,setMiniStatus]=useState('');
+  const [miniSpeed,setMiniSpeed]=useState<Sc03Speed>('balanced');
+  useEffect(()=>setMiniSpeed(getSc03Speed()),[]);
   const [cancelMode,setCancelMode]=useState(false);
   const [cancelReason,setCancelReason]=useState('');
   const [cancelling,setCancelling]=useState(false);
-  const autoPrintTriggered=useRef(false);
+  const autoPrintTriggered=useRef('');
 
   const load=useCallback(async()=>{
     setLoading(true);setError('');
@@ -71,19 +93,32 @@ export default function InvoiceDetailView({ invoiceId, portal }:Props){
   useEffect(()=>{void load();},[load]);
 
   useEffect(()=>{
-    if(loading||!invoice||!business||autoPrintTriggered.current)return;
-    if(new URLSearchParams(window.location.search).get('autoprint')!=='1')return;
-    // Print only after the invoice and receipt layout are ready. Keep the manual Print button as fallback.
+    if(loading||!invoice||!business||autoPrintTriggered.current===invoice.id)return;
+    const params=new URLSearchParams(window.location.search);
+    const mode=params.get('autoprint');
+    if(mode!=='1'&&mode!=='sc03')return;
+    // Schedule so Strict Mode's rehearsal cleanup does not consume the real print.
     const timer=window.setTimeout(()=>{
-      if(autoPrintTriggered.current)return;
-      autoPrintTriggered.current=true;
+      if(autoPrintTriggered.current===invoice.id)return;
+      autoPrintTriggered.current=invoice.id;
       const url=new URL(window.location.href);
-      url.searchParams.delete('autoprint');
+      url.searchParams.delete('autoprint');url.searchParams.delete('print_token');
       window.history.replaceState(window.history.state,'',url.toString());
-      window.print();
-    },600);
+      if(mode==='1'){window.print();return;}
+      try {
+        if(!consumeSc03Print(invoice.id,params.get('print_token')??'')) {
+          setMiniStatus('Bill saved. Automatic print was already used or expired. Check the paper, then use the Bluetooth button if needed.');return;
+        }
+      } catch {
+        setMiniStatus('Bill saved. Automatic print could not be tracked safely. Use the Bluetooth button to print once.');return;
+      }
+      setMiniPrinting(true);setMiniStatus('Sending saved bill to SC03…');
+      void printSc03Receipt(miniReceiptLines(invoice,items,business),setMiniStatus,{requireConnected:true})
+        .catch(reason=>setMiniStatus(reason instanceof Error?reason.message:'Print failed. The bill remains saved.'))
+        .finally(()=>setMiniPrinting(false));
+    },100);
     return ()=>window.clearTimeout(timer);
-  },[loading,invoice,business]);
+  },[loading,invoice,items,business]);
 
   if(loading||!org)return <WorkspaceLoader/>;
   if(error||!invoice||!business)return <main className="auth-wrap"><div className="card auth-card narrow"><div className="form-error">{error||'Invoice not found.'}</div></div></main>;
@@ -115,6 +150,15 @@ export default function InvoiceDetailView({ invoiceId, portal }:Props){
     const name=customer?.name||'Customer';
     const text=`Hello ${name}, your invoice ${safeInvoice.invoice_number} from ${safeBusiness.name} is ${formatINR(safeInvoice.grand_total)}.${Number(safeInvoice.amount_due)>0?` Amount due: ${formatINR(safeInvoice.amount_due)}.`:''} Thank you.`;
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`,'_blank','noopener,noreferrer');
+  }
+
+  async function printMini() {
+    if (miniPrinting) return;
+    setMiniPrinting(true); setError('');
+    try {
+      await printSc03Receipt(miniReceiptLines(safeInvoice,items,safeBusiness),setMiniStatus,{speed:miniSpeed});
+    } catch (error) {setMiniStatus(error instanceof Error ? error.message : 'Print failed. Your saved invoice is unchanged.');}
+    finally {setMiniPrinting(false);}
   }
 
   async function cancelInvoice(){
@@ -163,7 +207,7 @@ export default function InvoiceDetailView({ invoiceId, portal }:Props){
 
             <div className="payment-history-section">
               <div className="section-head"><div><span className="page-kicker">{t.paymentHistory}</span><h3>{t.moneyReceivedHistory}</h3></div></div>
-              {payments.length===0?<div className="empty-state compact">{t.noPaymentRecorded}</div>:<div className="payment-history-list">{payments.map(payment=><div key={payment.id}><span><strong>{payment.method}</strong><small>{formatDateTime(payment.created_at)}{payment.note?` · ${payment.note}`:''}</small></span><strong>{formatINR(payment.amount)}</strong></div>)}</div>}
+              {payments.length===0?<div className="empty-state compact">{t.noPaymentRecorded}</div>:<div className="payment-history-list">{payments.map(payment=><div key={payment.id}><span><strong>{payment.method}</strong><small>{formatDateTime(payment.created_at)}{payment.note?` · ${payment.note}`:''}</small></span><strong>{payment.payment_kind==='REFUND'?'Refund · ':''}{formatINR(payment.payment_kind==='REFUND'?-Number(payment.amount):payment.amount)}</strong></div>)}</div>}
             </div>
 
           {portal==='owner'&&safeInvoice.status!=='CANCELLED'&&safeInvoice.status!=='REFUNDED'&&<div className="invoice-danger-zone">
@@ -177,6 +221,13 @@ export default function InvoiceDetailView({ invoiceId, portal }:Props){
             <span className="page-kicker">{t.printFormat}</span><h3>{t.printTitle}</h3><p>{t.printSub}</p>
             <div className="print-format-list"><button className={`print-format-button ${format==='THERMAL_58MM'?'active':''}`} onClick={()=>setFormat('THERMAL_58MM')}><strong>{t.thermal2}</strong><small>{t.thermalReceipt58}</small></button><button className={`print-format-button ${format==='THERMAL_80MM'?'active':''}`} onClick={()=>setFormat('THERMAL_80MM')}><strong>{t.thermal3}</strong><small>{t.thermalReceipt80}</small></button><button className={`print-format-button ${format==='A4'?'active':''}`} onClick={()=>setFormat('A4')}><strong>{t.a4Invoice}</strong><small>{t.fullPageGstInvoice}</small></button></div>
             <button className="btn btn-primary print-now" onClick={()=>window.print()}>{t.print} {printLabel}</button>
+            <label htmlFor="sc03-speed">SC03 speed</label>
+            <select id="sc03-speed" className="select" value={miniSpeed} disabled={miniPrinting} onChange={event=>{
+              const speed=event.target.value as Sc03Speed;setMiniSpeed(speed);setSc03Speed(speed);
+            }}><option value="balanced">Faster</option><option value="compatible">Compatible (slower)</option></select>
+            <p className="muted">If lines are missing, select Compatible and check the paper before reprinting.</p>
+            <button className="btn print-now" onClick={printMini} disabled={miniPrinting}>{miniPrinting?'Printing…':'SC03 Mini Printer · Bluetooth'}</button>
+            {miniStatus&&<p role="status">{miniStatus}</p>}
             <div className="sharing-note"><strong>{t.pdfSharing}</strong><span>{t.shareNote}</span></div>
           </aside>
         </div>

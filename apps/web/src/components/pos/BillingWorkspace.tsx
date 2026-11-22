@@ -6,6 +6,10 @@ import OwnerShell from '@/components/pos/OwnerShell';
 import StaffShell from '@/components/pos/StaffShell';
 import WorkspaceLoader from '@/components/pos/WorkspaceLoader';
 import PosAssist from '@/components/pos/PosAssist';
+import CheckoutCustomer from '@/components/pos/CheckoutCustomer';
+import CameraBarcodeScanner from '@/components/pos/CameraBarcodeScanner';
+import { lookupBarcodeName } from '@/lib/barcode-lookup';
+import { connectSc03Printer, queueSc03Print } from '@/lib/sc03-printer';
 import BillingQuickAdd from '@/components/pos/BillingQuickAdd';
 import { formatINR, getCurrentOrganization, isSubscriptionUsable, type CurrentOrganization } from '@/lib/pos';
 import { createInvoice, getBillingPolicy, listCustomers, listProducts } from '@/lib/pos-api';
@@ -17,6 +21,7 @@ import { pendingBills,queueBill } from '@/lib/offline-bill';
 import PendingOfflineBill from './PendingOfflineBill';
 import { mergeVoiceBill,voiceBillReview } from '@/lib/voice-bill-review';
 import QuantityInput from './QuantityInput';
+import SimpleBillingGuide from './SimpleBillingGuide';
 import { billingQuantity } from '@/lib/billing-quantity';
 
 type Product={id:string;name:string;sku:string|null;barcode:string|null;selling_price:number;tax_rate:number;tax_inclusive:boolean;stock:number;unit:string};
@@ -33,6 +38,7 @@ function mergeProducts(...lists:Product[][]){
 
 export default function BillingWorkspace({portal}:Props){
   const router=useRouter();
+  const [simpleMode,setSimpleMode]=useState(false);
   const [online,setOnline]=useState(true);
   const [offlineLoaded,setOfflineLoaded]=useState(false);
   const [offlineNotice,setOfflineNotice]=useState('');
@@ -45,6 +51,11 @@ export default function BillingWorkspace({portal}:Props){
   const[cart,setCart]=useState<CartItem[]>([]);
   const[query,setQuery]=useState('');
   const[customerId,setCustomerId]=useState('');
+  const [customerPending,setCustomerPending]=useState(false);
+  const [printTarget,setPrintTarget]=useState<'sc03'|'system'>('sc03');
+  const [barcodeDraft,setBarcodeDraft]=useState<{barcode:string;name:string;nonce:number}>();
+  const [scanNotice,setScanNotice]=useState('');
+  const scanBusy=useRef(false);
   const[discountType,setDiscountType]=useState<'PERCENT'|'FLAT'>('PERCENT');
   const[discountValue,setDiscountValue]=useState('0');
   const[paymentMethod,setPaymentMethod]=useState('CASH');
@@ -173,6 +184,7 @@ export default function BillingWorkspace({portal}:Props){
   },[cart,effectiveDiscount,effectiveType]);
 
   function addProduct(product:Product){
+    if(submitting.current)return;
     setSuccess(null);
     setCart(current=>{
       const existing=current.find(item=>item.id===product.id);
@@ -184,6 +196,7 @@ export default function BillingWorkspace({portal}:Props){
   }
 
   function setQuantity(productId:string,quantity:number){
+    if(submitting.current)return;
     setCart(current=>current.map(item=>{
       if(item.id!==productId)return item;
       const next=billingQuantity(quantity,Number(item.stock));
@@ -191,11 +204,36 @@ export default function BillingWorkspace({portal}:Props){
     }));
   }
 
+  async function scannedBarcode(raw:string){
+    if(submitting.current||scanBusy.current)return;
+    const code=raw.trim();if(!code)return;
+    scanBusy.current=true;setScanNotice('Searching barcode…');setError('');
+    try{
+      let exact=mergeProducts(products,remoteProducts).find(p=>p.barcode===code||p.sku===code);
+      if(!exact&&online&&!offlineLoaded){
+        const result=await listProducts(code,true,50);
+        exact=(result.data as unknown as Product[]).find(p=>p.barcode===code||p.sku===code);
+      }
+      if(exact){
+        setProducts(current=>mergeProducts(current,[exact!]));
+        if(Number(exact.stock)<=0){setScanNotice(`${exact.name}: out of stock. Update inventory before billing.`);return;}
+        addProduct(exact);setScanNotice(`${exact.name} added to bill.`);return;
+      }
+      if(!online||offlineLoaded){setScanNotice('Barcode is not in this device’s offline catalog. Connect to add a new product.');return;}
+      let name='';let source='';
+      try{const found=await lookupBarcodeName(code);if(found){name=found.name;source=found.source;}}catch{/* Manual name entry remains available. */}
+      setBarcodeDraft({barcode:code,name,nonce:Date.now()});
+      setScanNotice(name?`Name suggested by ${source}: ${name}. Check the name, selling price, GST and stock in New product.`:'Barcode captured. No online name found; enter the name, price and stock in New product.');
+    }catch(reason){setError(reason instanceof Error?reason.message:'Could not search the shop catalog. Try again before adding a new product.');}
+    finally{scanBusy.current=false;}
+  }
+
   async function handleSearchKeyDown(event:KeyboardEvent<HTMLInputElement>){
     if(event.key!=='Enter')return;
     event.preventDefault();
     const raw=query.trim();
     if(!raw)return;
+    if(/^\d{8,14}$/.test(raw)){await scannedBarcode(raw);return;}
     const lowered=raw.toLowerCase();
     const exact=mergeProducts(products,remoteProducts).find(p=>String(p.barcode??'').toLowerCase()===lowered||String(p.sku??'').toLowerCase()===lowered);
     if(exact){addProduct(exact);return;}
@@ -216,6 +254,7 @@ export default function BillingWorkspace({portal}:Props){
   }
 
   async function createBill(items=cart, fromAssistant=false, printAfterSave=false){
+    if(customerPending){setError('Save/select the entered customer, or cancel those details before saving the bill.');if(fromAssistant)throw new Error('Select the entered customer first.');return;}
     if(recovery){setError('Restore the saved draft before creating a new bill.');if(fromAssistant)throw new Error('Restore the saved draft first.');return;}
     if(!org||items.length===0||submitting.current){if(fromAssistant)throw new Error('Wait for the current bill to finish.');return;}
     submitting.current=true;
@@ -247,6 +286,7 @@ export default function BillingWorkspace({portal}:Props){
         setError('इस डिवाइस पर बिल सुरक्षित है। अभी pending है; internet आने पर Sync करें।');
         return;
       }
+      if(printAfterSave&&printTarget==='sc03')await connectSc03Printer();
       if((await pendingBills(offlineKey)).length)throw new Error('Sync pending device bills before creating an online bill so stock stays correct.');
       const uid=getFirebaseAuth().currentUser?.uid;if(uid)clearOfflineWorkspace(uid);
       const response=await createInvoice({...input,clientInvoiceId:pendingInvoice.current.id});
@@ -261,7 +301,12 @@ export default function BillingWorkspace({portal}:Props){
       } catch { setError('Bill saved successfully. Refresh the catalog before creating another bill.'); }
       if (printAfterSave) {
         // Invoice already exists; a cancelled or failed print must never create another sale.
-        router.push(`${portal==='owner'?'/owner':'/staff'}/invoice?id=${encodeURIComponent(result.invoice_id)}&autoprint=1`);
+        let printQuery='autoprint=1';
+        if(printTarget==='sc03'){
+          try{printQuery=`autoprint=sc03&print_token=${encodeURIComponent(queueSc03Print(result.invoice_id))}`;}
+          catch{setError('Bill saved. Automatic print could not be prepared. Open View Receipt and tap Print SC03 once.');return;}
+        }
+        router.push(`${portal==='owner'?'/owner':'/staff'}/invoice?id=${encodeURIComponent(result.invoice_id)}&${printQuery}`);
       }
     } catch (reason) {
       setError(reason instanceof Error?reason.message:'Bill could not be created. Please check stock/network and retry.');
@@ -279,12 +324,21 @@ export default function BillingWorkspace({portal}:Props){
   const searchStatus=org.preferredLanguage==='hi'?'पूरे कैटलॉग में खोज रहे हैं…':org.preferredLanguage==='hinglish'?'Poore catalog mein search ho raha hai…':'Searching the full catalog…';
 
   return <Shell businessName={org.organizationName} language={org.preferredLanguage}>
+    <fieldset disabled={creating} style={{border:0,padding:0,margin:0,minWidth:0}}><div className={simpleMode?'simple-billing-mode':''}>
+    <div className="simple-mode-switch"><button type="button" className="btn" aria-pressed={simpleMode} onClick={()=>setSimpleMode(value=>!value)}>{org.preferredLanguage==='en'?(simpleMode?'Simple Mode: on — switch to Standard':'Use Simple Mode'):(simpleMode?'आसान मोड चालू — सामान्य मोड खोलें':'आसान मोड खोलें')}</button></div>
+    {simpleMode&&<SimpleBillingGuide hindi={org.preferredLanguage!=='en'} offline={!online||offlineLoaded} review={[
+      ...cart.map(item=>`${item.name}: ${item.quantity} ${item.unit}`),
+      `${org.preferredLanguage==='en'?'Estimated total':'अनुमानित कुल'}: ${formatINR(estimated.total)}`,
+      `${org.preferredLanguage==='en'?'Customer':'ग्राहक'}: ${customers.find(c=>c.id===customerId)?.name||t.walkInCustomer}`,
+      `${org.preferredLanguage==='en'?'Payment':'भुगतान'}: ${paymentMethod}`,
+      `${org.preferredLanguage==='en'?'Amount received':'मिली रकम'}: ${amountPaid|| (paymentMethod==='CREDIT'?'0':formatINR(estimated.total))}`
+    ].join('. ')}/>}
     <section className="card"><h2>{online?'Offline billing तैयार करें':'इंटरनेट बंद है / Offline'}</h2>{online&&!offlineLoaded&&<button className="btn" disabled={preparingOffline||creating} onClick={prepareOffline}>{preparingOffline?'तैयार हो रहा है…':'इस डिवाइस पर Offline तैयार करें'}</button>}{offlineLoaded&&online&&<button className="btn" onClick={()=>window.location.reload()}>Internet वापस आया — Reload करें</button>}{offlineNotice&&<p role="status">{offlineNotice}</p>}{!online&&<p>Cash/credit bills stay pending on this device. AI and new products need internet.</p>}</section>
     <PendingOfflineBill organizationId={org.organizationId} onSynced={()=>{const uid=getFirebaseAuth().currentUser?.uid;if(uid)clearOfflineWorkspace(uid);setError('Bill synced. Reload the catalog before the next sale.');void listProducts('',true,250).then(result=>setProducts(result.data as unknown as Product[])).catch(()=>setError('Bill synced, but catalog refresh failed. Reload before another sale.'));}} />
     {storageError&&<p className="form-error" role="alert">{storageError}</p>}
     {recovery&&<section className="card"><h2>पिछला अधूरा बिल मिला / Saved draft found</h2><p>{recovery.cart.length} items · {new Date(recovery.savedAt).toLocaleString()}. This is a recovery copy, not proof of a completed invoice. Restore it to safely retry.</p><button className="btn btn-primary" onClick={restoreDraft}>अधूरा बिल खोलें / Restore draft</button></section>}
     {recoveryReady&&cart.length>0&&!storageError&&<p role="status">ड्राफ्ट इस डिवाइस पर सुरक्षित है। Bill is final only after server confirmation.</p>}
-    {online&&!offlineLoaded&&<BillingQuickAdd hindi={org.preferredLanguage!=='en'} disabled={creating} onCustomer={customer=>{setCustomers(current=>[customer,...current]);setCustomerId(customer.id);}} onProduct={product=>{setProducts(current=>mergeProducts(current,[product]));addProduct(product);}}/>}
+    {online&&!offlineLoaded&&<BillingQuickAdd barcodeDraft={barcodeDraft} onBatchSaved={async()=>{const result=await listProducts('',true,250);setProducts(result.data as unknown as Product[]);}} hindi={org.preferredLanguage!=='en'} disabled={creating} onCustomer={customer=>{setCustomers(current=>[customer,...current]);setCustomerId(customer.id);}} onProduct={product=>{setProducts(current=>mergeProducts(current,[product]));addProduct(product);}}/>}
     {online&&!offlineLoaded&&<PosAssist mode="bill" getBillReview={(draft,hindi)=>voiceBillReview(mergeVoiceBill(cart,draft),{customer:customers.find(c=>c.id===customerId)?.name??(hindi?'बिना नाम के ग्राहक':'Walk-in'),customerId,payment:paymentMethod,paid:amountPaid,discountType:effectiveType,discount:effectiveDiscount},hindi)} confirmLabel="Confirm & save bill" reviewContext={`Adds to current cart (${cart.length} lines). Customer: ${customers.find(c=>c.id===customerId)?.name??'Walk-in'}. Payment: ${paymentMethod}. Paid: ${amountPaid || (paymentMethod==='CREDIT'?'0':'full')}. Discount: ${effectiveDiscount}${effectiveType==='PERCENT'?'%':' INR'}. Change these below before confirming.`} onConfirm={async draft=>{
       const next=mergeVoiceBill(cart,draft);
       await createBill(next,true);
@@ -298,21 +352,25 @@ export default function BillingWorkspace({portal}:Props){
     {error&&<div className="form-error" role="alert">{error}</div>}
     {success&&<div className="bill-success" role="status"><div><span>{t.billCreated}</span><h2>{success.invoiceNumber}</h2><p>{formatINR(success.total)} · {t.stockUpdated}</p></div><div className="hero-actions" style={{marginTop:0}}>{success.id&&<button className="btn btn-primary" onClick={()=>router.push(`${base}/invoice?id=${success.id}`)}>View Receipt</button>}<button className="btn" onClick={()=>setSuccess(null)}>{t.newBill}</button></div></div>}
     <div className="billing-grid premium-counter">
-      <section className="card billing-products"><div className="billing-search"><span className="search-mark" aria-hidden="true">⌕</span><input autoFocus aria-label={t.scanSearch} autoComplete="off" className="input" placeholder={t.scanSearch} value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={handleSearchKeyDown}/></div>{catalogBusy&&<div className="catalog-search-state" role="status">{searchStatus}</div>}<div className="product-picker">{filteredProducts.map(product=><button type="button" key={product.id} className="product-pick" disabled={Number(product.stock)<=0} onClick={()=>addProduct(product)}><span><strong>{product.name}</strong><small>{product.sku||product.barcode||`${Number(product.tax_rate)}% GST`}</small></span><span className="product-pick-right"><strong>{formatINR(product.selling_price)}</strong><small className={Number(product.stock)<=5?'stock-low':''}>{Number(product.stock)} {product.unit}</small></span></button>)}{filteredProducts.length===0&&!catalogBusy&&<div className="empty-state">{t.noMatchingProducts}</div>}</div></section>
+      <section className="card billing-products"><div style={{padding:16}}><CameraBarcodeScanner hindi={org.preferredLanguage!=='en'} disabled={creating} onScan={scannedBarcode}/>{scanNotice&&<p role="status">{scanNotice}</p>}</div><div className="billing-search"><span className="search-mark" aria-hidden="true">⌕</span><input autoFocus={!simpleMode} aria-label={t.scanSearch} autoComplete="off" className="input" placeholder={t.scanSearch} value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={handleSearchKeyDown}/></div>{catalogBusy&&<div className="catalog-search-state" role="status">{searchStatus}</div>}<div className="product-picker">{filteredProducts.map(product=><button type="button" key={product.id} className="product-pick" disabled={creating||Number(product.stock)<=0} onClick={()=>addProduct(product)}><span><strong>{product.name}</strong><small>{product.sku||product.barcode||`${Number(product.tax_rate)}% GST`}</small></span><span className="product-pick-right"><strong>{formatINR(product.selling_price)}</strong><small className={Number(product.stock)<=5?'stock-low':''}>{Number(product.stock)} {product.unit}</small></span></button>)}{filteredProducts.length===0&&!catalogBusy&&<div className="empty-state">{t.noMatchingProducts}</div>}</div></section>
       <section className="card bill-cart"><div className="bill-cart-head"><div><span className="page-kicker">{t.currentBill}</span><h2>{cart.length} {cart.length===1?t.item:t.items}</h2></div><button type="button" className="text-danger" onClick={()=>setCart([])}>{t.clear}</button></div><div className="cart-list">{cart.length===0?<div className="empty-state bill-empty"><span className="empty-receipt" aria-hidden="true">▤</span><strong>{t.startProduct}</strong><br/>{t.searchTapAdd}</div>:cart.map(item=><div className="cart-row" key={item.id}><div><strong>{item.name}</strong><small>{formatINR(item.selling_price)} · {Number(item.tax_rate)}% GST</small></div><div className="qty-control" aria-label={`${item.name} quantity`}><button type="button" aria-label={`Reduce ${item.name} quantity`} onClick={()=>setQuantity(item.id,item.quantity-1)}>-</button><QuantityInput name={item.name} value={item.quantity} stock={Number(item.stock)} onCommit={quantity=>setQuantity(item.id,quantity)}/><button type="button" aria-label={`Increase ${item.name} quantity`} onClick={()=>setQuantity(item.id,item.quantity+1)}>+</button></div><strong>{formatINR(Number(item.selling_price)*item.quantity)}</strong><button type="button" aria-label={`Remove ${item.name}`} className="cart-remove" onClick={()=>setCart(c=>c.filter(x=>x.id!==item.id))}>×</button></div>)}</div>
         <div className="bill-options"><div className="field"><label>{t.customer}</label><select className="select" value={customerId} onChange={e=>setCustomerId(e.target.value)}><option value="">{t.walkInCustomer}</option>{customers.map(c=><option key={c.id} value={c.id}>{c.name}{c.phone?` · ${c.phone}`:''}</option>)}</select></div>
+          {online&&!offlineLoaded&&<CheckoutCustomer storageKey={recoveryStorageKey.current?`${recoveryStorageKey.current}:customer`:null} hindi={org.preferredLanguage!=='en'} disabled={creating} onPendingChange={setCustomerPending} onCustomer={customer=>{setCustomers(current=>[customer,...current.filter(c=>c.id!==customer.id)]);setCustomerId(customer.id);}}/>}
           {portal==='owner'?<div className="discount-row"><div className="field"><label>{t.discount}</label><select className="select" value={discountType} onChange={e=>setDiscountType(e.target.value as 'PERCENT'|'FLAT')}><option value="PERCENT">{t.percentage}</option><option value="FLAT">{t.flat}</option></select></div><div className="field"><label>{t.value}</label><input className="input" type="number" min="0" step="0.01" value={discountValue} onChange={e=>setDiscountValue(e.target.value)}/></div></div>:policy.allowStaffDiscount?<div className="field"><label>{t.discount} % <span className="muted">({t.ownerDiscountLimit} {policy.staffDiscountLimit}%)</span></label><input className="input" type="number" min="0" max={policy.staffDiscountLimit} step="0.5" value={discountValue} onChange={e=>setDiscountValue(e.target.value)}/></div>:<div className="staff-policy-note">{t.discountOwnerOnly}</div>}
           <div className="payment-methods" aria-label="Payment method">{['CASH','UPI','CARD','CREDIT'].map(method=><button type="button" aria-pressed={paymentMethod===method} className={paymentMethod===method?'active':''} key={method} onClick={()=>setPaymentMethod(method)}>{method}</button>)}</div>
           <div className="field"><label>{t.amountPaid} <span className="muted">({t.amountPaidHint})</span></label><input className="input" type="number" inputMode="decimal" min="0" step="0.01" placeholder={paymentMethod==='CREDIT'?'0':estimated.total.toFixed(2)} value={amountPaid} onChange={e=>setAmountPaid(e.target.value)}/></div>
         </div>
         <div className="bill-totals"><div><span>{t.taxable}</span><strong>{formatINR(estimated.base)}</strong></div><div><span>{t.discount}</span><strong>- {formatINR(estimated.discount)}</strong></div><div><span>GST</span><strong>{formatINR(estimated.tax)}</strong></div><div className="bill-grand"><span>{t.total}</span><strong>{formatINR(estimated.total)}</strong></div></div>
+        <div className="field"><label htmlFor="billing-printer">Print to</label><select id="billing-printer" className="select" value={printTarget} onChange={e=>setPrintTarget(e.target.value as 'sc03'|'system')}><option value="sc03">SC03h Bluetooth mini printer</option><option value="system">System printer / PDF</option></select></div>
+        {customerPending&&<p role="status">Save/select the customer details above before saving this bill.</p>}
         <div style={{display:'grid',gridTemplateColumns:'repeat(2,minmax(0,1fr))',gap:10,marginTop:15}}>
-          <button type="button" className="btn" style={{width:'100%'}} disabled={creating||cart.length===0} onClick={()=>void createBill(cart,false,false)}>{creating?t.creatingBill:'Save Only'}</button>
-          <button type="button" className="btn btn-primary" style={{width:'100%'}} disabled={creating||cart.length===0||!online||offlineLoaded} onClick={()=>void createBill(cart,false,true)}>{creating?t.creatingBill:'Save & Print'}</button>
+          <button type="button" className="btn" style={{width:'100%'}} disabled={creating||customerPending||cart.length===0} onClick={()=>void createBill(cart,false,false)}>{creating?t.creatingBill:(org.preferredLanguage==='en'?'Save Only':'केवल सेव / Save Only')}</button>
+          <button type="button" className="btn btn-primary" style={{width:'100%'}} disabled={creating||customerPending||cart.length===0||!online||offlineLoaded} onClick={()=>void createBill(cart,false,true)}>{creating?t.creatingBill:(org.preferredLanguage==='en'?'Save & Print':'सेव + प्रिंट / Save & Print')}</button>
         </div>
         {(!online||offlineLoaded)&&<p className="billing-note">Web printing needs an online invoice. Save Only keeps eligible offline bills queued safely.</p>}
         <p className="billing-note">{t.transactionSavedFirst}</p>
       </section>
     </div>
+    </div></fieldset>
   </Shell>;
 }

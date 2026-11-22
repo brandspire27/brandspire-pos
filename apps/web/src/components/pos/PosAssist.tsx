@@ -1,9 +1,13 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { authenticatedApiRequest } from '@/lib/firebase';
+import { authenticatedApiRequest, getFirebaseAuth } from '@/lib/firebase';
+import { getCurrentOrganization } from '@/lib/pos';
+import { photoBatchKey } from '@/lib/product-photo-batch';
+import ProductBatchReview from './ProductBatchReview';
+import ProductPhotoInput from './ProductPhotoInput';
 
 type Speech = { lang: string; onresult: ((e: { results: { transcript: string }[][] }) => void) | null; onerror: (() => void) | null; onend: (() => void) | null; start(): void; abort(): void };
-export default function PosAssist({ mode, onDraft, onConfirm, confirmLabel, reviewContext, getBillReview }: { mode: 'product' | 'bill'; onDraft: (value: Record<string, unknown>) => void; onConfirm?: (value: Record<string, unknown>) => Promise<void>; confirmLabel?: string; reviewContext?: string; getBillReview?: (value:Record<string,unknown>,hindi:boolean)=>{text:string;signature:string;total:number} }) {
+export default function PosAssist({ mode, onDraft, onConfirm, confirmLabel, reviewContext, getBillReview, onBatchSaved }: { mode: 'product' | 'bill'; onBatchSaved?: () => void | Promise<void>; onDraft: (value: Record<string, unknown>) => void; onConfirm?: (value: Record<string, unknown>) => Promise<void>; confirmLabel?: string; reviewContext?: string; getBillReview?: (value:Record<string,unknown>,hindi:boolean)=>{text:string;signature:string;total:number} }) {
   const [text, setText] = useState('');
   const [image, setImage] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -14,7 +18,7 @@ export default function PosAssist({ mode, onDraft, onConfirm, confirmLabel, revi
   const [preview, setPreview] = useState<Record<string, unknown> | null>(null);
   const inFlight = useRef(false);
   const pending = useRef<Record<string, unknown> | null>(null);
-  const photoInput = useRef<HTMLInputElement | null>(null);
+  const batchOpen = mode === 'product' && Array.isArray(preview?.products);
   const speech = useRef<Speech | null>(null);
   const hindi = language === 'hi-IN';
   const reviewFn=useRef(getBillReview);reviewFn.current=getBillReview;
@@ -31,6 +35,7 @@ export default function PosAssist({ mode, onDraft, onConfirm, confirmLabel, revi
     window.speechSynthesis.speak(utterance);
   }
   function readPreview(value: Record<string, unknown>) {
+    if(mode==='product'&&Array.isArray(value.products)){say(`${value.products.length} ${hindi?'उत्पाद मिले। हर लाइन की कीमत जाँचकर सेव करें।':'products found. Review each price, then save selected products.'}`);return;}
     if(mode==='bill'&&reviewFn.current){const review=reviewFn.current(value,hindi);reviewed.current=review.signature;say(`${review.text} ${hindi?'सही है तो बिल सेव करें दबाएं।':'If correct, press Save bill.'}`);return;}
     const summary = mode === 'product'
       ? `${value.name}. ${hindi ? 'प्रति यूनिट कीमत' : 'Price per unit'} ${value.selling_price ?? (hindi ? 'नहीं मिली' : 'missing')}. ${hindi ? 'स्टॉक' : 'Stock'} ${value.stock ?? 0}. ${hindi ? 'टैक्स प्रतिशत' : 'Tax percent'} ${value.tax_rate ?? 0}.`
@@ -42,6 +47,21 @@ export default function PosAssist({ mode, onDraft, onConfirm, confirmLabel, revi
     update(); window.addEventListener('online',update); window.addEventListener('offline',update);
     return () => { speech.current?.abort(); window.speechSynthesis?.cancel(); window.removeEventListener('online',update); window.removeEventListener('offline',update); };
   }, []);
+  useEffect(() => {
+    if (mode !== 'product') return;
+    let active = true;
+    void (async () => {
+      try {
+        const organization = await getCurrentOrganization();
+        const uid = getFirebaseAuth().currentUser?.uid;
+        if (active && !pending.current && !inFlight.current && organization && uid && localStorage.getItem(photoBatchKey(uid, organization.organizationId))) {
+          const restored = { products: [], unresolved: [] };
+          pending.current = restored; setPreview(restored);
+        }
+      } catch { /* A new import still checks storage before sending any product. */ }
+    })();
+    return () => { active = false; };
+  }, [mode]);
   function listen() {
     window.speechSynthesis?.cancel();
     pending.current=null;setPreview(null);reviewed.current='';
@@ -61,7 +81,8 @@ export default function PosAssist({ mode, onDraft, onConfirm, confirmLabel, revi
     pending.current = null; setPreview(null);
     setBusy(true); setError(''); setSaved('');
     try {
-      const result = await authenticatedApiRequest<{ data: Record<string, unknown> }>('/pos/assist/draft', { method: 'POST', body: JSON.stringify({ mode, text: instructions, image }) });
+      const result = await authenticatedApiRequest<{ data: Record<string, unknown> }>('/pos/assist/draft', { method: 'POST', body: JSON.stringify({ mode, text: instructions, image, batch: mode === 'product' && !!image }) });
+      if(mode==='product'&&image&&!Array.isArray(result.data.products))throw new Error('The server returned a single product instead of the full list. Wait for the API update, then try again. No products were saved.');
       pending.current = result.data; setPreview(result.data);
       readPreview(result.data);
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not prepare draft.'); }
@@ -74,7 +95,6 @@ export default function PosAssist({ mode, onDraft, onConfirm, confirmLabel, revi
       if(mode==='bill'&&reviewFn.current){const review=reviewFn.current(pending.current,hindi);if(review.signature!==reviewed.current){readPreview(pending.current);setError(hindi?'बिल बदला है। नई रकम सुनकर फिर सेव करें दबाएं।':'Bill changed. Review the updated total, then press Save again.');return;}}
       await onConfirm(pending.current);
       pending.current = null; setPreview(null); setText(''); setImage(undefined);
-      if (photoInput.current) photoInput.current.value = '';
       setSaved(mode === 'product' ? 'Product saved.' : 'Bill saved.');
       say(hindi ? (mode === 'product' ? 'माल सेव हो गया।' : 'बिल सेव हो गया।') : 'Saved successfully.');
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not save.'); }
@@ -90,7 +110,6 @@ export default function PosAssist({ mode, onDraft, onConfirm, confirmLabel, revi
     try {
       onDraft(value);
       setPreview(null); setText(''); setImage(undefined); setError('');
-      if (photoInput.current) photoInput.current.value = '';
     } catch (e) {
       pending.current = value;
       setError(e instanceof Error ? e.message : 'Could not apply draft.');
@@ -100,25 +119,22 @@ export default function PosAssist({ mode, onDraft, onConfirm, confirmLabel, revi
     <h2>{hindi ? (mode === 'product' ? '📦 माल जोड़ें' : '🧾 बिल बनाएं') : (mode === 'product' ? 'Add stock' : 'Make a bill')}</h2>
     <p>{hindi ? 'बोलिए → सुनकर जाँचिए → सेव कीजिए' : 'Speak → Check → Save'}</p>
     {!online && <p role="alert">{hindi ? 'इंटरनेट बंद है। अभी यह AI सुविधा और वेब बिल सेव करने के लिए इंटरनेट चाहिए।' : 'Internet is disconnected. AI and web bill saving currently require a connection.'}</p>}
-    <button type="button" className="voice-counter-mic" disabled={busy || !online} onClick={()=>listening ? speech.current?.abort() : listen()}>{listening ? (hindi ? '⏹ सुन रहे हैं… रोकें' : 'Listening… Stop') : (hindi ? '🎙 यहाँ दबाकर बोलें' : 'Tap and speak')}</button>
+    <button type="button" className="voice-counter-mic" disabled={busy || !online || batchOpen} onClick={()=>listening ? speech.current?.abort() : listen()}>{listening ? (hindi ? '⏹ सुन रहे हैं… रोकें' : 'Listening… Stop') : (hindi ? '🎙 यहाँ दबाकर बोलें' : 'Tap and speak')}</button>
     <p>{hindi ? (mode==='product' ? 'जैसे: बीस पैकेट बिस्कुट जोड़ो, एक पैकेट दस रुपये।' : 'जैसे: दो किलो आटा और एक बोतल तेल का बिल बनाओ।') : 'Say the item names and quantities clearly.'}</p>
     <details><summary>{hindi ? '⌨ लिखें / फोटो / भाषा' : 'Type / Photo / Language'}</summary>
-    <label>Voice language <select className="select" value={language} disabled={listening||busy} onChange={e=>setLanguage(e.target.value)}><option value="hi-IN">Hindi / Hinglish</option><option value="en-IN">English (India)</option></select></label>
-    <p>{mode === 'product' ? 'Describe one product with its price, or choose a photo showing the label and price.' : 'Describe items and quantities or choose a shopping list photo. Uses catalog prices.'} Review before saving.</p>
-    <div className="field"><label htmlFor={`assist-${mode}`}>Instructions</label><textarea id={`assist-${mode}`} className="input" maxLength={2000} value={text} disabled={busy || listening} onChange={e => { setText(e.target.value); pending.current = null; setPreview(null); }} /></div>
-    <div className="field"><label>Photo (JPEG, PNG, WebP; up to 2 MB)<input ref={photoInput} type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={e => {
-      const file = e.target.files?.[0]; setImage(undefined); setError(''); pending.current = null; setPreview(null);
-      if (!file) return;
-      if (file.size > 2 * 1024 * 1024 || !['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) { setError('Choose a JPEG, PNG or WebP up to 2 MB.'); e.target.value = ''; return; }
-      const reader = new FileReader(); reader.onload = () => setImage(String(reader.result)); reader.onerror = () => setError('Could not read photo.'); reader.readAsDataURL(file);
-    }} /></label></div>
+    <label>Voice language <select className="select" value={language} disabled={listening||busy||batchOpen} onChange={e=>setLanguage(e.target.value)}><option value="hi-IN">Hindi / Hinglish</option><option value="en-IN">English (India)</option></select></label>
+    <p>{mode === 'product' ? 'Describe a product, or photograph a list of up to 30 products with prices. Every detected row can be reviewed and saved together.' : 'Describe items and quantities or choose a shopping list photo. Uses catalog prices.'} Review before saving.</p>
+    <div className="field"><label htmlFor={`assist-${mode}`}>Instructions</label><textarea id={`assist-${mode}`} className="input" maxLength={2000} value={text} disabled={busy || listening || batchOpen} onChange={e => { setText(e.target.value); pending.current = null; setPreview(null); }} /></div>
+    <ProductPhotoInput disabled={busy || listening || batchOpen} hindi={hindi} onError={setError} onPhoto={data => { setImage(data); setError(''); pending.current = null; setPreview(null); }} />
+    {image && <p role="status">{hindi ? 'फोटो चुनी गई है। नीचे देखें दबाएं।' : 'Photo selected. Press Preview below.'} <button type="button" className="btn" disabled={busy || batchOpen} onClick={() => setImage(undefined)}>{hindi ? 'फोटो हटाएं' : 'Remove photo'}</button></p>}
     <p className="muted">Simple text drafts use your backend without a cloud AI call. Other requests go to your configured AI provider. Voice may use your browser’s speech service.</p>
     <label><input type="checkbox" checked={audioHelp} onChange={e=>{setAudioHelp(e.target.checked);if(!e.target.checked)window.speechSynthesis?.cancel();}} />{hindi ? 'बोलकर मदद करें' : 'Spoken guidance'}</label>
-    <button type="button" className="btn" disabled={busy || listening || !online || (!text.trim()&&!image)} onClick={()=>draft()}>{hindi ? 'देखें' : 'Preview'}</button>
+    <button type="button" className="btn" disabled={busy || listening || !online || batchOpen || (!text.trim()&&!image)} onClick={()=>draft()}>{hindi ? 'देखें' : 'Preview'}</button>
     </details>
     {error && <div className="form-error" role="alert">{error}</div>}
     {saved && <p role="status">{saved}</p>}
-    {preview && <div aria-label="Review draft" aria-live="polite">
+    {batchOpen && preview && <ProductBatchReview products={preview.products as Record<string,unknown>[]} unresolved={Array.isArray(preview.unresolved) ? preview.unresolved as string[] : []} hindi={hindi} onSaved={onBatchSaved} onClose={() => { pending.current = null; setPreview(null); setImage(undefined); setText(''); }} />}
+    {preview && !batchOpen && <div aria-label="Review draft" aria-live="polite">
       <h3>{hindi ? 'क्या यह सही है?' : 'Is this correct?'}</h3>
       <button type="button" className="btn" disabled={!!reviewError||busy||listening} onClick={()=>{try{readPreview(preview);}catch(e){setError(e instanceof Error?e.message:'Please check details.');}}}>{hindi ? '🔊 फिर सुनें' : 'Listen again'}</button>
       {mode === 'product' ? <p>{String(preview.name)} · {preview.selling_price == null ? 'Price missing — enter manually' : `₹${Number(preview.selling_price).toFixed(2)}`}</p>
