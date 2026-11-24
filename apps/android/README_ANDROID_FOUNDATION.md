@@ -43,7 +43,7 @@ For local/debug builds, set `BRANDSPIRE_FIREBASE_API_KEY` and `BRANDSPIRE_API_BA
 
 ## Public Android preview download
 
-The public download is hosted at `/download` on Firebase Hosting; Firebase App Distribution is invite-only and is not used for this link. The APK is an early-access preview (currently version `0.4.0`, Android 8+). Bluetooth/USB printer behavior and offline operation still require testing on the target devices.
+The public download page is hosted at `/download` on Firebase Hosting, and the APK is a public GitHub Release asset because Firebase's Spark plan blocks executable APK uploads. Firebase App Distribution is invite-only and is not used for this link. The APK is an early-access preview (currently version `0.4.0`, Android 8+). Bluetooth/USB printer behavior and offline operation still require testing on the target devices.
 
 Release builds must be signed with a private release keystore. Keep that keystore and its passwords backed up securely; never commit them. The Gradle release build reads these environment variables, with environment values taking priority over `gradle.properties`:
 
@@ -54,4 +54,4 @@ Release builds must be signed with a private release keystore. Keep that keystor
 - `BRANDSPIRE_RELEASE_KEY_ALIAS`
 - `BRANDSPIRE_RELEASE_KEY_PASSWORD`
 
-Build with `.\gradlew.bat :app:assembleRelease`. After `npm run build:firebase`, place the signed APK at `apps/web/out/downloads/brandspire-pos-0.4.0.apk`, then deploy Firebase Hosting for project `bsp-pos`. Keep the version in the download page and APK filename aligned when publishing later updates. Direct APK installs do not update automatically; users need the same signing key for future updates.
+Build with `.\gradlew.bat :app:assembleRelease`, then publish the signed APK as a public GitHub Release asset named `brandspire-pos-<version>.apk`. Update the versioned URL on the Firebase `/download` page and deploy the static site to project `bsp-pos`; do not upload the APK to Firebase Hosting on the Spark plan. Direct APK installs do not update automatically; users need the same signing key for future updates.

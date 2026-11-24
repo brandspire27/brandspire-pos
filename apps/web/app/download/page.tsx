@@ -1,6 +1,6 @@
 import Link from 'next/link';
 
-const apkUrl = '/downloads/brandspire-pos-0.4.0.apk';
+const apkUrl = 'https://github.com/brandspire27/brandspire-pos/releases/download/android-v0.4.0/brandspire-pos-0.4.0.apk';
 
 export default function AndroidDownloadPage() {
   return <main className="shell android-download-shell">
