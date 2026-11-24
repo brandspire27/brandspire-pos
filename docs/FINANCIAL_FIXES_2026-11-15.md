@@ -24,7 +24,7 @@ These tests do not certify a physical phone/printer, actual Android persistence 
 ## Deployment sequence
 
 1. Take and verify a restorable database backup.
-2. Apply new migrations **0007_pos_operations** and **0008_financial_events** using the migration runner. They add a table and reporting views; do not edit old migration checksums.
+2. The API container runs the idempotent migration runner before starting. Confirm migrations **0007_pos_operations** and **0008_financial_events** are applied in the target database; they add a table and reporting views. Do not edit old migration checksums.
 3. Coordinate API, Firebase web and signed Android updates in a maintenance window. Older clients without operation IDs will receive a clear 400 response for these mutations; do not deploy this backend alone and expect old clients to remain compatible.
 4. Verify authenticated staging flows including a lost response and reload. Check actual report totals and ledger with the deployed revision.
 5. Complete remaining release gates: production backup restore, credential revocation evidence, signed APK/install/update, phone/printer matrix, tenant HTTP acceptance, live payment/settlement and pilot.

@@ -19,9 +19,10 @@ export async function applyMigrations(client, directory) {
     .sort();
 
   for (const file of files) {
-    const sql = await readFile(path.join(directory, file), 'utf8');
+    const sql = (await readFile(path.join(directory, file), 'utf8')).replace(/\r\n?/g, '\n');
     const version = file.replace(/\.sql$/i, '');
     const checksum = createHash('sha256').update(sql).digest('hex');
+    const legacyWindowsChecksum = createHash('sha256').update(sql.replace(/\n/g, '\r\n')).digest('hex');
     const transaction = await client.transaction('write');
     try {
       const applied = await transaction.execute({
@@ -29,7 +30,7 @@ export async function applyMigrations(client, directory) {
         args: [version]
       });
       if (applied.rows.length) {
-        if (applied.rows[0].checksum !== checksum) {
+        if (applied.rows[0].checksum !== checksum && applied.rows[0].checksum !== legacyWindowsChecksum) {
           throw new Error(`Applied migration ${version} has changed; create a new migration instead`);
         }
         await transaction.commit();

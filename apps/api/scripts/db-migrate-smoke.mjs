@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { readdir } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createClient } from '@libsql/client';
 import { applyMigrations } from './db-migrate.mjs';
@@ -16,6 +17,14 @@ try {
   try {
     console.log = (message) => migrationLogs.push(message);
     await applyMigrations(client, migrationsDirectory);
+    const initialMigration = await readFile(path.join(migrationsDirectory, '0001_turso_schema.sql'), 'utf8');
+    const legacyWindowsChecksum = createHash('sha256')
+      .update(initialMigration.replace(/\r\n?/g, '\n').replace(/\n/g, '\r\n'))
+      .digest('hex');
+    await client.execute({
+      sql: 'UPDATE schema_migrations SET checksum = ? WHERE version = ?',
+      args: [legacyWindowsChecksum, '0001_turso_schema']
+    });
     await applyMigrations(client, migrationsDirectory);
   } finally {
     console.log = originalLog;
