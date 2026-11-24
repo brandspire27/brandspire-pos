@@ -43,7 +43,7 @@ For local/debug builds, set `BRANDSPIRE_FIREBASE_API_KEY` and `BRANDSPIRE_API_BA
 
 ## Public Android preview download
 
-The public download page is hosted at `/download` on Firebase Hosting, and the APK is a public GitHub Release asset because Firebase's Spark plan blocks executable APK uploads. Firebase App Distribution is invite-only and is not used for this link. The APK is an early-access preview (currently version `0.4.0`, Android 8+). Bluetooth/USB printer behavior and offline operation still require testing on the target devices.
+The public download page is hosted at `/download` on Firebase Hosting, and the APK is a public GitHub Release asset because Firebase's Spark plan blocks executable APK uploads. Firebase App Distribution is invite-only and is not used for this link. The APK is an early-access preview (currently version `0.4.1`, Android 8+). Bluetooth/USB printer behavior and offline operation still require testing on the target devices.
 
 Release builds must be signed with a private release keystore. Keep that keystore and its passwords backed up securely; never commit them. The Gradle release build reads these environment variables, with environment values taking priority over `gradle.properties`:
 

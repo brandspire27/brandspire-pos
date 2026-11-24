@@ -281,17 +281,6 @@ class BrandspireApiClient(private val context: android.content.Context? = null) 
     private fun dataArray(response: String): JSONArray =
         JSONObject(response).optJSONArray("data") ?: error("Brandspire API returned an invalid list response")
 
-    private fun String.toAuthSession(): AuthSession {
-        val json = JSONObject(this)
-        return AuthSession(
-            accessToken = json.getString("id_token"),
-            refreshToken = json.getString("refresh_token"),
-            expiresAtEpochSeconds = Instant.now().epochSecond + json.optLong("expires_in", 3600),
-            userId = json.optString("localId", json.optString("user_id")),
-            email = json.optString("email", json.optString("user_email"))
-        )
-    }
-
     private fun encodeQuery(value: String): String = URLEncoder.encode(value, "UTF-8")
     private fun encodePath(value: String): String = URLEncoder.encode(value, "UTF-8")
 
@@ -335,4 +324,20 @@ class BrandspireApiClient(private val context: android.content.Context? = null) 
         }
         return text.ifBlank { "{}" }
     }
+}
+
+internal fun String.toAuthSession(): AuthSession {
+    val json = JSONObject(this)
+    val accessToken = json.optString("idToken").ifBlank { json.optString("id_token") }
+        .ifBlank { error("Firebase response did not include an ID token") }
+    val refreshToken = json.optString("refreshToken").ifBlank { json.optString("refresh_token") }
+        .ifBlank { error("Firebase response did not include a refresh token") }
+    val expiresIn = json.optLong("expiresIn", json.optLong("expires_in", 3600))
+    return AuthSession(
+        accessToken = accessToken,
+        refreshToken = refreshToken,
+        expiresAtEpochSeconds = Instant.now().epochSecond + expiresIn,
+        userId = json.optString("localId", json.optString("user_id")),
+        email = json.optString("email", json.optString("user_email"))
+    )
 }

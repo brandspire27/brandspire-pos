@@ -31,8 +31,8 @@ android {
         applicationId = "com.brandspire.pos"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.4.0"
+        versionCode = 5
+        versionName = "0.4.1"
         manifestPlaceholders["usesCleartextTraffic"] = "true"
 
         buildConfigField("String", "FIREBASE_API_KEY", quoted(firebaseApiKey))
@@ -67,6 +67,7 @@ kotlin {
 
 dependencies {
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.activity:activity-ktx:1.10.1")
     implementation("androidx.work:work-runtime-ktx:2.10.0")
