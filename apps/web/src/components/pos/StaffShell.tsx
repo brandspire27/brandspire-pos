@@ -8,6 +8,7 @@ import { clearOfflineWorkspace } from '@/lib/offline-workspace';
 import { signOut } from 'firebase/auth';
 import { clearWorkspaceCache } from '@/lib/pos';
 import { posText, type PosLanguage } from '@/lib/pos-i18n';
+import { PosLanguageProvider, uiText } from '@/lib/pos-language';
 import BrandspireAssist from '@/components/pos/BrandspireAssist';
 
 type Props = { businessName: string; language?: PosLanguage; children: ReactNode };
@@ -30,20 +31,36 @@ export default function StaffShell({ businessName, language = 'en', children }: 
     ['/staff/customers', t.customers, 'customer'],
     ['/staff/products', t.products, 'product']
   ];
-  const activeFor=(href:string)=>href==='/staff'?pathname===href:pathname.startsWith(href);
+  const activeFor=(href:string)=>pathname===href||(href!=='/staff'&&pathname.startsWith(`${href}/`));
+  const currentSection=links.find(([href])=>activeFor(href));
+  const sectionLabel=pathname==='/staff/invoice'
+    ?uiText(language,'Bill receipt','बिल की रसीद','Bill ki receipt')
+    :currentSection?.[1]??t.staffWorkspace;
   async function logout() { clearWorkspaceCache(); const uid=getFirebaseAuth().currentUser?.uid;if(uid)clearOfflineWorkspace(uid); await signOut(getFirebaseAuth()); router.push('/auth/login'); }
   return (
-    <main className="staff-shell">
+    <PosLanguageProvider language={language}>
+    <main className="staff-shell" lang={language==='hi'?'hi':language==='hinglish'?'hi-Latn':'en'}>
       <header className="staff-topbar no-print">
         <div className="staff-topbar-left"><div className="brand-lockup"><span className="brand-mark" aria-hidden="true">BP</span><div className="brand-copy"><strong>Brandspire POS</strong><small>{t.staffWorkspace}</small></div></div><span className="staff-business-pill">{businessName}</span></div>
-        <nav className="staff-nav" aria-label="Staff navigation">{links.map(([href,label]) => { const active=activeFor(href); return <Link key={href} aria-current={active?'page':undefined} className={active ? 'active' : ''} href={href}>{label}</Link>; })}</nav>
-        <div className="staff-topbar-right"><button className="btn" onClick={logout}>{t.logout}</button></div>
+        <nav className="staff-nav" aria-label={uiText(language,'Staff navigation','कर्मचारी का नेविगेशन','Staff navigation')}>{links.map(([href,label]) => { const active=activeFor(href); return <Link key={href} title={label} aria-label={label} aria-current={active?'page':undefined} className={active ? 'active' : ''} href={href}><span className="nav-label">{label}</span></Link>; })}</nav>
+        <div className="staff-topbar-right"><button className="btn" title={t.logout} aria-label={t.logout} onClick={logout}>{t.logout}</button></div>
       </header>
-      <section className="staff-main">{children}</section>
-      <nav className="mobile-workspace-nav staff-mobile-nav no-print" aria-label="Staff quick navigation">
-        {links.map(([href,label,icon])=>{const active=activeFor(href);return <Link key={href} href={href} className={active?'active':''} aria-current={active?'page':undefined}><StaffNavIcon type={icon}/><span>{label}</span></Link>})}
+      <section className="staff-main">
+        <header className="workspace-location no-print" aria-label={uiText(language,'Current section','मौजूदा पेज','Abhi khula page')}>
+          <span className="workspace-location-label">{uiText(language,'You are viewing','आप यहाँ हैं','Aap yahan hain')}</span>
+          <nav aria-label={uiText(language,'Breadcrumb','पेज का रास्ता','Page ka raasta')}>
+            <Link className="workspace-location-business" href="/staff" title={t.dashboard} aria-label={`${businessName} · ${t.dashboard}`}>{businessName}</Link>
+            <span aria-hidden="true"> / </span>
+            <strong className="workspace-location-current" aria-current="page">{sectionLabel}</strong>
+          </nav>
+        </header>
+        {children}
+      </section>
+      <nav className="mobile-workspace-nav staff-mobile-nav no-print" aria-label={uiText(language,'Staff quick navigation','कर्मचारी के मुख्य पेज','Staff ke main pages')}>
+        {links.map(([href,label,icon])=>{const active=activeFor(href);return <Link key={href} title={label} aria-label={label} href={href} className={active?'active':''} aria-current={active?'page':undefined}><StaffNavIcon type={icon}/><span className="nav-label">{label}</span></Link>})}
       </nav>
       <BrandspireAssist language={language} role="STAFF" />
     </main>
+    </PosLanguageProvider>
   );
 }

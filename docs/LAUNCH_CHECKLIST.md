@@ -1,6 +1,6 @@
 # BrandSpire launch acceptance checklist
 
-Updated 14 November 2026. This checklist replaces Supabase-specific assumptions with the current Firebase/Turso stack.
+Updated 15 November 2026. See RELEASE_AUDIT_2026-11-15.md for fresh evidence and remaining blockers. This checklist replaces Supabase-specific assumptions with the current Firebase/Turso stack.
 
 - [x] Payment reconciliation, rollback/retry and duplicate activation regression tests
 - [x] Sandbox hosted checkout success and bank-decline scenario
@@ -11,7 +11,11 @@ Updated 14 November 2026. This checklist replaces Supabase-specific assumptions 
 - [ ] Live production payment, webhook activation and settlement accepted
 - [ ] Real Android and iPhone offline launch/restart/reconnect matrix
 - [ ] Exact 58mm printer models accepted for each supported transport/platform
-- [ ] Android fractional-quantity and Hindi receipt rendering corrected and tested
+- [x] Android fractional quantity/raster encoder implemented; debug build and three unit tests pass
+- [ ] Hindi raster output visually accepted on the exact physical printer
+- [x] Local transaction regression checks for concurrent collections, stock adjustment, cancellation and refund
+- [x] Refund event reporting and manual mutation retry IDs implemented with local regression checks
+- [ ] Financial changes accepted in staging/production, including rounding edge cases and client rollout
 - [ ] Signed Android release configuration and physical install/update accepted
 - [ ] Owner A / Owner B / Staff isolation independently verified across all routes
 - [ ] Resolve and verify historical credential revocation recorded in SECURITY-REVIEW.md

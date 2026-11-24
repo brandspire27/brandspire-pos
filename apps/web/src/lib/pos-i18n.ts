@@ -95,3 +95,16 @@ export function localizedStatus(language: PosLanguage, status: string) {
   if (language === 'hinglish') return hgMap[status] ?? normalized;
   return normalized;
 }
+
+/** Display labels only: API payment codes stay unchanged. */
+export function localizedPaymentMethod(language: PosLanguage, method: string) {
+  const labels: Record<string, readonly [string, string, string]> = {
+    CASH: ['Cash', 'नकद', 'Cash'],
+    UPI: ['UPI', 'UPI', 'UPI'],
+    CARD: ['Card', 'कार्ड', 'Card'],
+    CREDIT: ['Credit', 'उधार', 'Udhaar'],
+    OTHER: ['Other', 'अन्य', 'Doosra'],
+  };
+  const label = labels[method.toUpperCase()];
+  return label?.[language === 'hi' ? 1 : language === 'hinglish' ? 2 : 0] ?? method;
+}

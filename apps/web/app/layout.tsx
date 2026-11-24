@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import './globals.css';
+import './workspace.css';
 
 export const metadata = {
   title: 'Brandspire POS',

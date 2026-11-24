@@ -15,7 +15,7 @@ object PrinterDiscovery {
             return emptyList()
         }
         return adapter.bondedDevices.orEmpty().map {
-            PrinterDevice(it.address, it.name ?: "Bluetooth printer", PrinterDevice.Transport.BLUETOOTH)
+            PrinterDevice(it.address, it.name ?: "Bluetooth printer", if (it.name?.startsWith("SC03h", ignoreCase = true) == true) PrinterDevice.Transport.SC03_BLE else PrinterDevice.Transport.BLUETOOTH)
         }.sortedBy { it.name.lowercase() }
     }
 

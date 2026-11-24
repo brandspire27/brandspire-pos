@@ -34,7 +34,7 @@ object A4InvoicePdf {
             if (y > 730f) return@repeat
             val item = items.getJSONObject(index)
             canvas.drawText(item.optString("name", "Item").take(38), 42f, y, ink)
-            canvas.drawText(item.optInt("quantity", 1).toString(), 330f, y, ink)
+            canvas.drawText(com.brandspire.pos.printer.receiptQuantity(item.optDouble("quantity", 1.0)), 330f, y, ink)
             canvas.drawText(money(item.optDouble("rate", 0.0)), 390f, y, ink)
             canvas.drawText(money(item.optDouble("total", 0.0)), 490f, y, ink)
             y += 22f

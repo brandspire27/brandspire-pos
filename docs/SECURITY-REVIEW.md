@@ -12,7 +12,11 @@
 - **Credential revocation/rotation:** Required, not verifiable or executable from this repository workspace. Revoke the exposed key in the Supabase project, issue a replacement only to trusted deployment secret stores if the legacy service is still needed, and check hosting/CI copies. Do not paste keys into chat or commit them.
 - **Git history:** Not rewritten. The previous committed value may still be retrievable from repository history, forks, clones, caches, and deployment artifacts. Coordinate any history purge with repository administrators after rotating the credential; a history rewrite does not replace credential rotation.
 
-## Unresolved security risks
+## Historical review scope
+
+The runtime statements below describe an older Supabase revision and are superseded by the 15 November 2026 audit in RELEASE_AUDIT_2026-11-15.md. Current code uses Firebase guards, Turso and tenant-scoped R2 file metadata. The credential revocation finding above remains unresolved until independently confirmed.
+
+## Unresolved security risks (historical snapshot)
 
 - The application remains Supabase-backed at runtime. Direct web/Android data calls and NestJS database/auth paths have not yet been moved to Firebase/Turso; removing legacy configuration now would break current operations.
 - The added Firebase verifier is not wired into all routes, and new Turso/R2 services are not yet the authorization-enforced source of truth.

@@ -6,6 +6,7 @@ import OwnerShell from '@/components/pos/OwnerShell';
 import WorkspaceLoader from '@/components/pos/WorkspaceLoader';
 import { formatINR, getCurrentOrganization, type CurrentOrganization } from '@/lib/pos';
 import { posText } from '@/lib/pos-i18n';
+import { uiText } from '@/lib/pos-language';
 import { addCustomer as createCustomer, listCustomers, removeCustomer as deleteCustomer } from '@/lib/pos-api';
 
 type Customer = { id:string; name:string; phone:string|null; email:string|null; address:string|null; state:string|null; gstin:string|null; outstanding_balance:number; created_at:string };
@@ -41,10 +42,10 @@ export default function CustomersPage() {
     {error&&<div className="form-error">{error}</div>}
     {showForm&&<form className="card inline-form-panel" onSubmit={addCustomer}><div className="form-panel-head"><div><h2>{t.newCustomer}</h2><p>{t.newCustomerSub}</p></div></div><div className="grid-2">
       <div className="field"><label>{t.name} *</label><input className="input" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} required/></div>
-      <div className="field"><label>{t.phone}</label><input className="input" inputMode="tel" value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})} placeholder="10-digit mobile"/></div>
+      <div className="field"><label>{t.phone}</label><input className="input" inputMode="tel" value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})} placeholder={uiText(org.preferredLanguage,'10-digit mobile','10 अंकों का मोबाइल नंबर','10 digit ka mobile number')}/></div>
       <div className="field"><label>{t.email}</label><input className="input" type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></div>
       <div className="field"><label>{t.gstin}</label><input className="input" value={form.gstin} onChange={e=>setForm({...form,gstin:e.target.value})}/></div>
-      <div className="field"><label>{t.state}</label><input className="input" value={form.state} onChange={e=>setForm({...form,state:e.target.value})} placeholder="Uttar Pradesh"/></div>
+      <div className="field"><label>{t.state}</label><input className="input" value={form.state} onChange={e=>setForm({...form,state:e.target.value})} placeholder={uiText(org.preferredLanguage,'e.g. Uttar Pradesh','जैसे: उत्तर प्रदेश','Jaise: Uttar Pradesh')}/></div>
       <div className="field"><label>{t.address}</label><input className="input" value={form.address} onChange={e=>setForm({...form,address:e.target.value})}/></div>
     </div><div className="form-actions"><button type="button" className="btn" onClick={()=>setShowForm(false)}>{t.cancel}</button><button className="btn btn-primary" disabled={saving}>{saving?t.saving:t.saveCustomer}</button></div></form>}
     <section className="card pos-panel"><div className="list-toolbar"><input className="input search-input" placeholder={t.searchCustomer} value={query} onChange={e=>setQuery(e.target.value)}/><span>{filtered.length} {t.customers.toLowerCase()}</span></div><div className="data-table-wrap"><table className="data-table"><thead><tr><th>{t.customer}</th><th>{t.contact}</th><th>{t.gstin}</th><th>{t.outstanding}</th><th></th></tr></thead><tbody>{filtered.length===0?<tr><td colSpan={5}><div className="empty-state">{t.noCustomers}</div></td></tr>:filtered.map(customer=><tr key={customer.id}><td><strong>{customer.name}</strong><small>{customer.state||customer.address||t.noAddress}</small></td><td>{customer.phone||'—'}<small>{customer.email||''}</small></td><td>{customer.gstin||'—'}</td><td><strong>{formatINR(customer.outstanding_balance)}</strong></td><td className="table-action"><button className="text-danger" onClick={()=>removeCustomer(customer)}>{t.remove}</button></td></tr>)}</tbody></table></div></section>

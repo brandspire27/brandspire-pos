@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { once } from './operation';
 import { TursoService } from '../database/turso.service';
 
 const optionalText = z.string().trim().max(500).optional().nullable();
@@ -429,7 +430,7 @@ export class PosService {
         [invoiceId, organizationId]
       ),
       this.database.execute(`SELECT id, product_name_snapshot, hsn_sac_snapshot, unit_snapshot, quantity, unit_price, tax_rate, taxable_amount, cgst, sgst, igst, line_total FROM invoice_items WHERE invoice_id = ? AND organization_id = ? ORDER BY created_at`, [invoiceId, organizationId]),
-      this.database.execute(`SELECT id, amount, method, status, note, created_at FROM payments WHERE invoice_id = ? AND organization_id = ? ORDER BY created_at DESC`, [invoiceId, organizationId]),
+      this.database.execute(`SELECT id, amount, method, status, payment_kind, note, created_at FROM payments WHERE invoice_id = ? AND organization_id = ? ORDER BY created_at DESC`, [invoiceId, organizationId]),
       this.database.execute(`SELECT name, phone, email, address, state, gstin FROM organizations WHERE id = ?`, [organizationId]),
       this.database.execute(`SELECT default_print_format, receipt_header, receipt_footer, invoice_footer, show_gstin_on_receipt FROM organization_settings WHERE organization_id = ?`, [organizationId])
     ]);
@@ -440,18 +441,19 @@ export class PosService {
   async issuePayment(organizationId: string, userId: string, invoiceId: string, input: unknown) {
     const parsed = z.object({ amount: z.number().positive(), method: z.enum(['CASH', 'UPI', 'CARD', 'CREDIT', 'OTHER']), note: optionalText }).safeParse(input);
     if (!parsed.success) throw new BadRequestException(parsed.error.issues[0]?.message ?? 'Invalid payment');
-    const invoiceResult = await this.database.execute(
-      `SELECT customer_id, grand_total, amount_paid, amount_due, status FROM invoices
+    return this.database.transaction(async (tx) => once(tx, organizationId, userId, 'issuePayment', invoiceId, input, async () => {
+    const invoiceResult = await tx.execute({
+      sql: `SELECT customer_id, grand_total, amount_paid, amount_due, status FROM invoices
        WHERE id = ? AND organization_id = ? LIMIT 1`,
-      [invoiceId, organizationId]
-    );
+      args: [invoiceId, organizationId]
+    });
     const invoice = invoiceResult.rows[0] as unknown as { customer_id:string|null; grand_total:number; amount_paid:number; amount_due:number; status:string } | undefined;
     if (!invoice || ['CANCELLED', 'REFUNDED'].includes(invoice.status)) throw new NotFoundException('Open invoice not found');
     const amount = Math.round(parsed.data.amount * 100) / 100;
+    if (amount <= 0) throw new BadRequestException('Payment must be at least 0.01');
     if (amount > Number(invoice.amount_due) + 0.001) throw new BadRequestException('Payment cannot exceed the outstanding amount');
     const newPaid = Number(invoice.amount_paid) + amount;
     const newDue = Math.max(0, Number(invoice.grand_total) - newPaid);
-    await this.database.transaction(async (tx) => {
       await tx.execute({
         sql: `INSERT INTO payments(id, organization_id, invoice_id, amount, method, status, note, created_by)
               VALUES (?, ?, ?, ?, ?, 'CAPTURED', ?, ?)`,
@@ -465,8 +467,8 @@ export class PosService {
         sql: `UPDATE customers SET outstanding_balance = MAX(0, outstanding_balance - ?), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND organization_id = ?`,
         args: [amount, invoice.customer_id, organizationId]
       });
-    });
     return { invoiceId, amountPaid: newPaid, amountDue: newDue };
+    }));
   }
 
   async eligibleReturnInvoices(organizationId: string) {
@@ -483,7 +485,7 @@ export class PosService {
   async returnableInvoiceItems(organizationId: string, invoiceId: string) {
     const result = await this.database.execute(
       `SELECT ii.id, ii.product_name_snapshot, ii.quantity, ii.line_total, ii.product_id,
-        COALESCE(SUM(cni.quantity), 0) AS returned_quantity
+        COALESCE(SUM(CASE WHEN cn.status = 'ISSUED' THEN cni.quantity ELSE 0 END), 0) AS returned_quantity
        FROM invoice_items ii LEFT JOIN credit_note_items cni ON cni.invoice_item_id = ii.id AND cni.organization_id = ii.organization_id
        LEFT JOIN credit_notes cn ON cn.id = cni.credit_note_id AND cn.organization_id = cni.organization_id AND cn.status = 'ISSUED'
        WHERE ii.organization_id = ? AND ii.invoice_id = ? GROUP BY ii.id ORDER BY ii.created_at`,
@@ -503,18 +505,19 @@ export class PosService {
     if (new Set(parsed.data.items.map((item) => item.invoice_item_id)).size !== parsed.data.items.length) {
       throw new BadRequestException('Return items must be unique');
     }
-    const result = await this.database.execute(
-      `SELECT id, customer_id, grand_total, credited_amount, status FROM invoices WHERE id = ? AND organization_id = ? LIMIT 1`,
-      [invoiceId, organizationId]
-    );
-    const invoice = result.rows[0] as unknown as DbRecord | undefined;
-    if (!invoice || invoice.status === 'CANCELLED' || invoice.status === 'REFUNDED') throw new NotFoundException('Eligible invoice not found');
     const noteId = randomUUID();
     const now = new Date();
     const year = now.getFullYear();
     let noteNumber = '';
     let total = 0, taxable = 0, cgst = 0, sgst = 0, igst = 0;
-    await this.database.transaction(async (tx) => {
+    return this.database.transaction(async (tx) => once(tx, organizationId, userId, 'issueCreditNote', invoiceId, input, async () => {
+      const result = await tx.execute({
+        sql: `SELECT id, customer_id, grand_total, credited_amount, status, amount_due, payment_status FROM invoices WHERE id = ? AND organization_id = ? LIMIT 1`,
+        args: [invoiceId, organizationId]
+      });
+      const invoice = result.rows[0] as unknown as DbRecord | undefined;
+      if (!invoice || invoice.status === 'CANCELLED' || invoice.status === 'REFUNDED') throw new NotFoundException('Eligible invoice not found');
+      if (invoice.payment_status !== 'PAID' || Number(invoice.amount_due) !== 0) throw new BadRequestException('Only fully paid invoices can be refunded');
       const invoiceItems = await tx.execute({
         sql: `SELECT id, product_id, product_name_snapshot, quantity, unit_price, taxable_amount, cgst, sgst, igst, line_total
           FROM invoice_items WHERE organization_id = ? AND invoice_id = ?`,
@@ -589,26 +592,26 @@ export class PosService {
           updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND organization_id = ?`,
         args: [creditedTotal, creditedTotal, creditedTotal, invoiceId, organizationId]
       });
-    });
     return { credit_note_number: noteNumber, total_amount: total };
+    }));
   }
 
   async cancelInvoice(organizationId: string, userId: string, invoiceId: string, input: unknown) {
     const parsed = z.object({ reason: z.string().trim().min(3).max(500) }).safeParse(input);
     if (!parsed.success) throw new BadRequestException(parsed.error.issues[0]?.message ?? 'A cancellation reason is required');
-    const invoiceResult = await this.database.execute(
-      `SELECT customer_id, amount_due, amount_paid, status FROM invoices WHERE id = ? AND organization_id = ? LIMIT 1`,
-      [invoiceId, organizationId]
-    );
+    return this.database.transaction(async (tx) => once(tx, organizationId, userId, 'cancelInvoice', invoiceId, input, async () => {
+    const invoiceResult = await tx.execute({
+      sql: `SELECT customer_id, amount_due, amount_paid, status FROM invoices WHERE id = ? AND organization_id = ? LIMIT 1`,
+      args: [invoiceId, organizationId]
+    });
     const invoice = invoiceResult.rows[0] as unknown as { customer_id:string|null; amount_due:number; amount_paid:number; status:string } | undefined;
     if (!invoice) throw new NotFoundException('Invoice not found');
     if (invoice.status === 'CANCELLED') throw new BadRequestException('Invoice is already cancelled');
     if (Number(invoice.amount_paid) > 0) throw new BadRequestException('Invoices with payments must be refunded before cancellation');
-    const lines = await this.database.execute(
-      `SELECT product_id, quantity FROM invoice_items WHERE organization_id = ? AND invoice_id = ? AND product_id IS NOT NULL`,
-      [organizationId, invoiceId]
-    );
-    await this.database.transaction(async (tx) => {
+    const lines = await tx.execute({
+      sql: `SELECT product_id, quantity FROM invoice_items WHERE organization_id = ? AND invoice_id = ? AND product_id IS NOT NULL`,
+      args: [organizationId, invoiceId]
+    });
       for (const row of lines.rows as unknown as Array<{ product_id:string; quantity:number }>) {
         const current = await tx.execute({
           sql: `SELECT stock FROM products WHERE id = ? AND organization_id = ?`,
@@ -634,30 +637,30 @@ export class PosService {
           updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND organization_id = ?`,
         args: [invoice.amount_due, invoice.customer_id, organizationId]
       });
-    });
     return { cancelled: true };
+    }));
   }
 
   async adjustStock(organizationId: string, userId: string, productId: string, input: unknown) {
     const parsed = z.object({ quantityChange: z.number().refine((value) => value !== 0), note: optionalText }).safeParse(input);
     if (!parsed.success) throw new BadRequestException(parsed.error.issues[0]?.message ?? 'Invalid stock adjustment');
-    const rowResult = await this.database.execute(
-      `SELECT stock FROM products WHERE id = ? AND organization_id = ? AND active = 1 AND deleted_at IS NULL LIMIT 1`,
-      [productId, organizationId]
-    );
+    return this.database.transaction(async (tx) => once(tx, organizationId, userId, 'adjustStock', productId, input, async () => {
+    const rowResult = await tx.execute({
+      sql: `SELECT stock FROM products WHERE id = ? AND organization_id = ? AND active = 1 AND deleted_at IS NULL LIMIT 1`,
+      args: [productId, organizationId]
+    });
     if (!rowResult.rows.length) throw new NotFoundException('Product not found');
     const stock = Number((rowResult.rows[0] as unknown as { stock:number }).stock);
     const after = stock + parsed.data.quantityChange;
     if (after < 0) throw new BadRequestException('Stock adjustment cannot make stock negative');
-    await this.database.transaction(async (tx) => {
       await tx.execute({ sql: `UPDATE products SET stock = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND organization_id = ?`, args: [after, productId, organizationId] });
       await tx.execute({
         sql: `INSERT INTO inventory_movements(id, organization_id, product_id, movement_type, quantity_change, stock_after, actor_user_id, note)
               VALUES (?, ?, ?, 'ADJUSTMENT', ?, ?, ?, ?)`,
         args: [randomUUID(), organizationId, productId, parsed.data.quantityChange, after, userId, parsed.data.note || null]
       });
-    });
     return { productId, stock: after };
+    }));
   }
 
   async inventoryMovements(organizationId: string) {
@@ -679,19 +682,22 @@ export class PosService {
     const result = await this.database.execute(
       `SELECT 'INVOICE' AS event_type, i.invoice_number AS reference, 'Invoice issued' AS description,
         i.grand_total AS debit, 0 AS credit, i.created_at AS event_time
-       FROM invoices i WHERE i.organization_id = ? AND i.customer_id = ? AND i.status NOT IN ('CANCELLED','REFUNDED')
+       FROM invoices i WHERE i.organization_id = ? AND i.customer_id = ? AND i.status != 'CANCELLED'
        UNION ALL
-       SELECT 'PAYMENT', i.invoice_number, COALESCE(p.note, 'Payment received'), 0, p.amount, p.created_at
+       SELECT CASE WHEN p.payment_kind = 'REFUND' THEN 'REFUND' ELSE 'PAYMENT' END, i.invoice_number, COALESCE(p.note, 'Payment received'), CASE WHEN p.payment_kind = 'REFUND' THEN p.amount ELSE 0 END, CASE WHEN p.payment_kind = 'REFUND' THEN 0 ELSE p.amount END, p.created_at
        FROM payments p JOIN invoices i ON i.id = p.invoice_id AND i.organization_id = p.organization_id
        WHERE p.organization_id = ? AND i.customer_id = ? AND p.status = 'CAPTURED'
+       UNION ALL
+       SELECT 'CREDIT_NOTE', cn.credit_note_number, cn.reason, 0, cn.total_amount, cn.created_at
+       FROM credit_notes cn WHERE cn.organization_id = ? AND cn.customer_id = ? AND cn.status = 'ISSUED'
        ORDER BY event_time DESC`,
-      [organizationId, customerId, organizationId, customerId]
+      [organizationId, customerId, organizationId, customerId, organizationId, customerId]
     );
     let balance = 0;
     const timeline = (result.rows as unknown as Array<DbRecord & { debit:number; credit:number }>)
       .reverse().map((row) => {
         balance += Number(row.debit ?? 0) - Number(row.credit ?? 0);
-        return { ...row, running_balance: Math.max(0, balance) };
+        return { ...row, running_balance: Math.round(balance * 100) / 100 };
       }).reverse();
     return { customer: customer.rows[0], events: timeline };
   }
@@ -699,8 +705,8 @@ export class PosService {
   async dashboardSummary(organizationId: string, todayStart: string) {
     const [today, lowStock, outstanding, recent] = await Promise.all([
       this.database.execute(
-        `SELECT COALESCE(SUM(grand_total), 0) AS sales, COUNT(*) AS bills FROM invoices
-         WHERE organization_id = ? AND created_at >= ? AND status != 'CANCELLED'`,
+        `SELECT COALESCE(SUM(gross), 0) AS sales, COALESCE(SUM(bill_count),0) AS bills FROM pos_sales_events
+         WHERE organization_id = ? AND event_date >= ?`,
         [organizationId, todayStart]
       ),
       this.database.execute(
@@ -726,79 +732,32 @@ export class PosService {
   }
 
   async reportSummary(organizationId: string, from: string, to: string) {
-    const [totals, breakdown, topProducts, lowStock, dailySales, staffSales] = await Promise.all([
-      this.database.execute(
-        `SELECT COALESCE(SUM(grand_total),0) AS sales, COALESCE(SUM(amount_paid),0) AS collected,
-          COALESCE(SUM(amount_due),0) AS due, COUNT(*) AS billCount, COALESCE(AVG(grand_total),0) AS averageBill
-         FROM invoices WHERE organization_id = ? AND invoice_date >= ? AND invoice_date <= ? AND status NOT IN ('CANCELLED','REFUNDED')`,
-        [organizationId, from, to]
-      ),
-      this.database.execute(
-        `SELECT method, SUM(amount) AS amount FROM payments WHERE organization_id = ? AND status = 'CAPTURED'
-         AND created_at >= ? AND created_at <= ? GROUP BY method ORDER BY amount DESC`,
-        [organizationId, from, to]
-      ),
-      this.database.execute(
-        `SELECT ii.product_name_snapshot AS name, SUM(ii.quantity) AS quantity, SUM(ii.line_total) AS sales FROM invoice_items ii
-         JOIN invoices i ON i.id = ii.invoice_id AND i.organization_id = ii.organization_id
-         WHERE ii.organization_id = ? AND i.invoice_date >= ? AND i.invoice_date <= ? AND i.status NOT IN ('CANCELLED','REFUNDED')
-         GROUP BY ii.product_name_snapshot ORDER BY sales DESC LIMIT 10`,
-        [organizationId, from, to]
-      ),
+    const args = [organizationId, from, to];
+    const [totals, breakdown, topProducts, lowStock, dailySales, staffSales, dues] = await Promise.all([
+      this.database.execute(`SELECT COALESCE(SUM(gross),0) AS sales, COALESCE(SUM(bill_count),0) AS billCount FROM pos_sales_events WHERE organization_id = ? AND event_date >= ? AND event_date <= ?`, args),
+      this.database.execute(`SELECT method, SUM(CASE WHEN payment_kind = 'REFUND' THEN -amount ELSE amount END) AS amount FROM payments WHERE organization_id = ? AND status = 'CAPTURED' AND created_at >= ? AND created_at <= ? GROUP BY method ORDER BY amount DESC`, args),
+      this.database.execute(`SELECT name, SUM(quantity) AS quantity, SUM(gross) AS sales FROM pos_sales_line_events WHERE organization_id = ? AND event_date >= ? AND event_date <= ? GROUP BY product_id, name ORDER BY sales DESC LIMIT 10`, args),
       this.database.execute(`SELECT id, name, stock, low_stock_threshold AS threshold, unit FROM products WHERE organization_id = ? AND active = 1 AND deleted_at IS NULL AND stock <= low_stock_threshold ORDER BY stock LIMIT 10`, [organizationId]),
-      this.database.execute(
-        `SELECT date(invoice_date) AS date, COALESCE(SUM(grand_total),0) AS sales, COUNT(*) AS bills FROM invoices
-         WHERE organization_id = ? AND invoice_date >= ? AND invoice_date <= ? AND status NOT IN ('CANCELLED','REFUNDED')
-         GROUP BY date(invoice_date) ORDER BY date(invoice_date)`,
-        [organizationId, from, to]
-      ),
-      this.database.execute(
-        `SELECT COALESCE(up.display_name, sp.full_name, 'Owner') AS name, COALESCE(SUM(i.grand_total),0) AS sales, COUNT(*) AS bills
-         FROM invoices i LEFT JOIN user_profiles up ON up.firebase_uid = i.created_by
-         LEFT JOIN staff_profiles sp ON sp.user_id = i.created_by AND sp.organization_id = i.organization_id
-         WHERE i.organization_id = ? AND i.invoice_date >= ? AND i.invoice_date <= ? AND i.status NOT IN ('CANCELLED','REFUNDED')
-         GROUP BY i.created_by ORDER BY sales DESC`,
-        [organizationId, from, to]
-      )
+      this.database.execute(`SELECT date(event_date) AS date, SUM(gross) AS sales, SUM(bill_count) AS bills FROM pos_sales_events WHERE organization_id = ? AND event_date >= ? AND event_date <= ? GROUP BY date(event_date) ORDER BY date(event_date)`, args),
+      this.database.execute(`SELECT COALESCE(up.display_name, sp.full_name, 'Owner') AS name, SUM(e.gross) AS sales, SUM(e.bill_count) AS bills FROM pos_sales_events e LEFT JOIN user_profiles up ON up.firebase_uid = e.created_by LEFT JOIN staff_profiles sp ON sp.user_id = e.created_by AND sp.organization_id = e.organization_id WHERE e.organization_id = ? AND e.event_date >= ? AND e.event_date <= ? GROUP BY e.created_by ORDER BY sales DESC`, args),
+      this.database.execute(`SELECT COALESCE(SUM(amount_due),0) AS due FROM invoices WHERE organization_id = ? AND invoice_date >= ? AND invoice_date <= ? AND status != 'CANCELLED'`, args)
     ]);
     const row = totals.rows[0] as unknown as DbRecord;
+    const sales = Number(row.sales), billCount = Number(row.billCount);
     return {
-      summary: {
-        sales: Number(row.sales), collected: Number(row.collected), due: Number(row.due),
-        billCount: Number(row.billCount), averageBill: Number(row.averageBill)
-      },
+      summary: { sales, collected: breakdown.rows.reduce((sum, row) => sum + Number(row.amount), 0), due: Number(dues.rows[0].due), billCount, averageBill: billCount ? sales / billCount : 0 },
       paymentBreakdown: breakdown.rows, topProducts: topProducts.rows, lowStock: lowStock.rows,
       dailySales: dailySales.rows, staffSales: staffSales.rows
     };
   }
 
   async gstReport(organizationId: string, from: string, to: string) {
-    const [result, invoices, rates] = await Promise.all([
-      this.database.execute(
-        `SELECT COALESCE(SUM(taxable_amount),0) AS taxableSales, COALESCE(SUM(cgst),0) AS cgst,
-          COALESCE(SUM(sgst),0) AS sgst, COALESCE(SUM(igst),0) AS igst
-         FROM invoices WHERE organization_id = ? AND invoice_date >= ? AND invoice_date <= ? AND status NOT IN ('CANCELLED','REFUNDED')`,
-        [organizationId, from, to]
-      ),
-      this.database.execute(`SELECT COUNT(*) AS count, COALESCE(SUM(grand_total),0) AS gross FROM invoices WHERE organization_id = ? AND invoice_date >= ? AND invoice_date <= ? AND status NOT IN ('CANCELLED','REFUNDED')`, [organizationId, from, to]),
-      this.database.execute(
-        `SELECT ii.tax_rate AS rate, SUM(ii.taxable_amount) AS taxable, SUM(ii.cgst) AS cgst, SUM(ii.sgst) AS sgst,
-          SUM(ii.igst) AS igst, SUM(ii.cgst + ii.sgst + ii.igst) AS totalTax, SUM(ii.line_total) AS gross
-         FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id AND i.organization_id = ii.organization_id
-         WHERE ii.organization_id = ? AND i.invoice_date >= ? AND i.invoice_date <= ? AND i.status NOT IN ('CANCELLED','REFUNDED')
-         GROUP BY ii.tax_rate ORDER BY ii.tax_rate`,
-        [organizationId, from, to]
-      )
+    const args = [organizationId, from, to];
+    const [result, rates] = await Promise.all([
+      this.database.execute(`SELECT COALESCE(SUM(bill_count),0) AS invoiceCount, COALESCE(SUM(gross),0) AS grossSales, COALESCE(SUM(taxable),0) AS taxableSales, COALESCE(SUM(cgst),0) AS cgst, COALESCE(SUM(sgst),0) AS sgst, COALESCE(SUM(igst),0) AS igst FROM pos_sales_events WHERE organization_id = ? AND event_date >= ? AND event_date <= ?`, args),
+      this.database.execute(`SELECT rate, SUM(taxable) AS taxable, SUM(cgst) AS cgst, SUM(sgst) AS sgst, SUM(igst) AS igst, SUM(cgst + sgst + igst) AS totalTax, SUM(gross) AS gross FROM pos_sales_line_events WHERE organization_id = ? AND event_date >= ? AND event_date <= ? GROUP BY rate ORDER BY rate`, args)
     ]);
-    const row = result.rows[0] as unknown as DbRecord;
-    const invoiceSummary = invoices.rows[0] as unknown as DbRecord;
-    const summary = { taxableSales: Number(row.taxableSales), cgst: Number(row.cgst), sgst: Number(row.sgst), igst: Number(row.igst) };
-    return {
-      summary: {
-        invoiceCount: Number(invoiceSummary.count), grossSales: Number(invoiceSummary.gross),
-        ...summary, totalTax: summary.cgst + summary.sgst + summary.igst
-      },
-      rateBreakdown: rates.rows
-    };
+    const row = result.rows[0];
+    return { summary: { invoiceCount: Number(row.invoiceCount), grossSales: Number(row.grossSales), taxableSales: Number(row.taxableSales), cgst: Number(row.cgst), sgst: Number(row.sgst), igst: Number(row.igst), totalTax: Number(row.cgst) + Number(row.sgst) + Number(row.igst) }, rateBreakdown: rates.rows };
   }
 }

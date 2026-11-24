@@ -1,8 +1,21 @@
 import { authenticatedApiRequest } from '@/lib/firebase';
 import { getFirebaseAuth } from '@/lib/firebase';
 import { getCurrentOrganization } from '@/lib/pos';
+import { runPendingOperation } from '@/lib/pending-operation';
 
 type PosResponse<T> = { success: true; data: T };
+
+async function mutation<T>(path: string, input: Record<string, unknown>): Promise<T> {
+  const workspace = await getCurrentOrganization();
+  const uid = getFirebaseAuth().currentUser?.uid;
+  if (!workspace || !uid) throw new Error('Please sign in again.');
+  const key = `brandspire.operation:${uid}:${workspace.organizationId}:${path}`;
+  if (!navigator.locks) throw new Error('Update your browser to safely record this action.');
+  return navigator.locks.request(key, { ifAvailable: true }, async lock => {
+    if (!lock) throw new Error('This action is already being submitted. Please wait.');
+    return runPendingOperation(localStorage, key, input, body => authenticatedApiRequest<T>(path, { method: 'POST', body: JSON.stringify(body) }));
+  });
+}
 
 export function listProducts(query = '', activeOnly = false, limit = 500) {
   const params = new URLSearchParams({ q: query, active: String(activeOnly), limit: String(limit) });
@@ -86,21 +99,15 @@ export function getInvoiceDetail(id: string) {
 }
 
 export function collectInvoicePayment(id: string, input: { amount: number; method: string; note?: string }) {
-  return authenticatedApiRequest<PosResponse<{ amountDue: number }>>(`/pos/invoices/${encodeURIComponent(id)}/payments`, {
-    method: 'POST', body: JSON.stringify(input)
-  });
+  return mutation<PosResponse<{ amountDue: number }>>(`/pos/invoices/${encodeURIComponent(id)}/payments`, input);
 }
 
 export function cancelInvoice(id: string, reason: string) {
-  return authenticatedApiRequest(`/pos/invoices/${encodeURIComponent(id)}/cancel`, {
-    method: 'POST', body: JSON.stringify({ reason })
-  });
+  return mutation(`/pos/invoices/${encodeURIComponent(id)}/cancel`, { reason });
 }
 
 export function adjustInventory(id: string, quantityChange: number, note?: string) {
-  return authenticatedApiRequest(`/pos/products/${encodeURIComponent(id)}/adjust-stock`, {
-    method: 'POST', body: JSON.stringify({ quantityChange, note })
-  });
+  return mutation(`/pos/products/${encodeURIComponent(id)}/adjust-stock`, { quantityChange, note });
 }
 
 export function listInventoryMovements() {
@@ -136,7 +143,5 @@ export function listReturnItems(invoiceId: string) {
 }
 
 export function issueCreditNote(invoiceId: string, input: Record<string, unknown>) {
-  return authenticatedApiRequest<PosResponse<{ credit_note_number: string; total_amount: number }>>(
-    `/pos/invoices/${encodeURIComponent(invoiceId)}/credit-notes`, { method: 'POST', body: JSON.stringify(input) }
-  );
+  return mutation<PosResponse<{ credit_note_number: string; total_amount: number }>>(`/pos/invoices/${encodeURIComponent(invoiceId)}/credit-notes`, input);
 }

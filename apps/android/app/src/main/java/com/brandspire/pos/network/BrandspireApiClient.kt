@@ -11,7 +11,37 @@ import java.net.URLEncoder
 import java.net.URL
 import java.time.Instant
 
-class BrandspireApiClient {
+class BrandspireApiClient(private val context: android.content.Context? = null) {
+    private class ApiFailure(val status: Int, message: String) : IllegalStateException(message)
+    companion object {
+        private val pendingLocks = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.locks.ReentrantLock>()
+    }
+
+    private fun mutation(path: String, organizationId: String, token: String, body: JSONObject): String {
+        val ctx = requireNotNull(context) { "Device storage is required for safe retries" }
+        val user = com.brandspire.pos.auth.SecureSessionStore(ctx).read()?.userId ?: error("Please sign in again")
+        val key = "$user:$organizationId:$path"
+        val lock = pendingLocks.computeIfAbsent(key) { java.util.concurrent.locks.ReentrantLock() }
+        check(lock.tryLock()) { "This action is already being submitted. Please wait." }
+        try {
+            val store = ctx.getSharedPreferences("pos_pending_operations", android.content.Context.MODE_PRIVATE)
+            val payload = body.toString()
+            val previous = store.getString(key, null)
+            val pending = previous?.let { JSONObject(it) }
+                ?: JSONObject().put("operationId", java.util.UUID.randomUUID().toString()).put("payload", payload)
+            check(pending.getString("payload") == payload) { "Retry the previous unconfirmed details first: ${pending.getString("payload")}" }
+            check(store.edit().putString(key, pending.toString()).commit()) { "Unable to save retry details" }
+            body.put("operationId", pending.getString("operationId"))
+            try {
+                val response = request("POST", path, token, body.toString())
+                store.edit().remove(key).commit()
+                return response
+            } catch (error: ApiFailure) {
+                if (previous == null && error.status in listOf(400, 401, 403, 404, 422, 429)) store.edit().remove(key).commit()
+                throw error
+            }
+        } finally { lock.unlock() }
+    }
     private val baseUrl = BuildConfig.API_BASE_URL.trimEnd('/')
     private val firebaseApiKey = BuildConfig.FIREBASE_API_KEY
 
@@ -193,7 +223,7 @@ class BrandspireApiClient {
     ): JSONArray {
         val body = JSONObject().put("amount", amount).put("method", method)
         if (note.isNullOrBlank()) body.put("note", JSONObject.NULL) else body.put("note", note.trim())
-        val data = JSONObject(request("POST", "/api/pos/invoices/${encodePath(invoiceId)}/payments", accessToken, body.toString()))
+        val data = JSONObject(mutation("/api/pos/invoices/${encodePath(invoiceId)}/payments", organizationId, accessToken, body))
             .optJSONObject("data")
         return JSONArray().put(data ?: JSONObject())
     }
@@ -207,7 +237,7 @@ class BrandspireApiClient {
     ): JSONArray {
         val body = JSONObject().put("quantityChange", quantityChange)
         if (note.isNullOrBlank()) body.put("note", JSONObject.NULL) else body.put("note", note.trim())
-        val data = JSONObject(request("POST", "/api/pos/products/${encodePath(productId)}/adjust-stock", accessToken, body.toString()))
+        val data = JSONObject(mutation("/api/pos/products/${encodePath(productId)}/adjust-stock", organizationId, accessToken, body))
             .optJSONObject("data")
         return JSONArray().put(data ?: JSONObject())
     }
@@ -301,7 +331,7 @@ class BrandspireApiClient {
                     else -> json.optJSONObject("error")?.optString("message") ?: json.optString("error")
                 }
             }.getOrNull().orEmpty()
-            throw IllegalStateException(message.ifBlank { "Request failed ($status): $text" })
+            throw ApiFailure(status, message.ifBlank { "Request failed ($status): $text" })
         }
         return text.ifBlank { "{}" }
     }

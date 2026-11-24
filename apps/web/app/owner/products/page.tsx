@@ -9,6 +9,7 @@ import CameraBarcodeScanner from '@/components/pos/CameraBarcodeScanner';
 import { lookupBarcodeName } from '@/lib/barcode-lookup';
 import { formatINR, getCurrentOrganization, type CurrentOrganization } from '@/lib/pos';
 import { posText } from '@/lib/pos-i18n';
+import { uiText } from '@/lib/pos-language';
 import { addProduct as createProduct, listProducts, removeProduct as deleteProduct } from '@/lib/pos-api';
 
 type Product={id:string;name:string;sku:string|null;barcode:string|null;unit:string;hsn_sac:string|null;purchase_price:number;selling_price:number;tax_rate:number;tax_inclusive:boolean;stock:number;low_stock_threshold:number;created_at:string};
@@ -17,33 +18,34 @@ const emptyForm={name:'',sku:'',barcode:'',unit:'pcs',hsnSac:'',purchasePrice:''
 export default function ProductsPage(){
   const router=useRouter();const [org,setOrg]=useState<CurrentOrganization|null>(null);const [products,setProducts]=useState<Product[]>([]);const [form,setForm]=useState(emptyForm);const [query,setQuery]=useState('');const [showForm,setShowForm]=useState(false);const [saving,setSaving]=useState(false);const [error,setError]=useState('');
   const loadProducts=useCallback(async(organizationId:string)=>{void organizationId;const response=await listProducts('',false,300);setProducts(response.data as unknown as Product[]);},[]);
-  useEffect(()=>{getCurrentOrganization().then(async current=>{if(!current)return router.replace('/auth/login');if(current.role!=='OWNER')return router.replace('/staff');setOrg(current);try{await loadProducts(current.organizationId);}catch(err){setError(err instanceof Error?err.message:'Could not load products.');}});},[loadProducts,router]);
+  useEffect(()=>{getCurrentOrganization().then(async current=>{if(!current)return router.replace('/auth/login');if(current.role!=='OWNER')return router.replace('/staff');setOrg(current);try{await loadProducts(current.organizationId);}catch(err){setError(err instanceof Error?err.message:uiText(current.preferredLanguage,'Could not load products.','उत्पाद नहीं लोड हुए।','Products load nahi hue.'));}});},[loadProducts,router]);
   const filtered=useMemo(()=>{const text=query.toLowerCase().trim();if(!text)return products;return products.filter(p=>[p.name,p.sku,p.barcode,p.hsn_sac].some(v=>String(v??'').toLowerCase().includes(text)));},[products,query]);
   const t=posText(org?.preferredLanguage??'en');
+  const text=(en:string,hi:string,hinglish:string)=>uiText(org?.preferredLanguage??'en',en,hi,hinglish);
   const hindi=org?.preferredLanguage==='hi';
   const [barcodeNotice,setBarcodeNotice]=useState<{text:string;url?:string}>({text:''});
   async function scanProduct(code:string,preserveDraft=false){
-    setError('');setBarcodeNotice({text:hindi?'Product dhoondh rahe hain…':'Looking up product…'});
+    setError('');setBarcodeNotice({text:text('Looking up product…','उत्पाद खोज रहे हैं…','Product dhoondh rahe hain…')});
     let catalog=products;
-    if(navigator.onLine){try{const response=await listProducts(code,false,500);catalog=response.data as unknown as Product[];}catch{setBarcodeNotice({text:''});throw new Error(hindi?'Catalog check nahi ho saka. Connection check karke phir scan karein.':'Could not check your catalog. Check your connection and scan again.');}}
+    if(navigator.onLine){try{const response=await listProducts(code,false,500);catalog=response.data as unknown as Product[];}catch{setBarcodeNotice({text:''});throw new Error(text('Could not check your catalog. Check your connection and scan again.','कैटलॉग नहीं जाँचा जा सका। इंटरनेट जाँचकर फिर स्कैन करें।','Catalog check nahi ho saka. Connection check karke phir scan karein.'));}}
     const existing=catalog.filter(product=>product.barcode===code||product.sku?.toLowerCase()===code.toLowerCase());
-    if(existing.length){setProducts(current=>[...current,...existing.filter(p=>!current.some(known=>known.id===p.id))]);setQuery(code);setShowForm(false);setBarcodeNotice({text:hindi?'Yeh product pehle se catalog mein hai.':'This product is already in your catalog.'});return;}
+    if(existing.length){setProducts(current=>[...current,...existing.filter(p=>!current.some(known=>known.id===p.id))]);setQuery(code);setShowForm(false);setBarcodeNotice({text:text('This product is already in your catalog.','यह उत्पाद पहले से आपके कैटलॉग में है।','Yeh product pehle se catalog mein hai.')});return;}
     setQuery('');setShowForm(true);setForm(current=>({...preserveDraft?current:emptyForm,barcode:code}));
     const suggestion=await lookupBarcodeName(code);
     setForm(current=>current.barcode===code?{...current,name:current.name.trim()?current.name:suggestion?.name??''}:current);
-    setBarcodeNotice(suggestion?{text:hindi?`${suggestion.source} se naam mila. Naam check karke apni price, GST aur stock bharein.`:`Name suggested by ${suggestion.source}. Review it and enter your price, GST and stock.`,url:suggestion.sourceUrl}:{text:hindi?'Online naam nahi mila. Barcode bhar diya hai; naam aur price likhein.':'No online name found. Barcode is filled; enter the product name and price.'});
+    setBarcodeNotice(suggestion?{text:text(`Name suggested by ${suggestion.source}. Review it and enter your price, GST and stock.`,`${suggestion.source} से नाम मिला। नाम जाँचकर अपनी कीमत, GST और स्टॉक भरें।`,`${suggestion.source} se naam mila. Naam check karke apni price, GST aur stock bharein.`),url:suggestion.sourceUrl}:{text:text('No online name found. Barcode is filled; enter the product name and price.','ऑनलाइन नाम नहीं मिला। बारकोड भर दिया है; उत्पाद का नाम और कीमत लिखें।','Online naam nahi mila. Barcode bhar diya hai; naam aur price likhein.')});
   }
-  async function addProduct(event:FormEvent){event.preventDefault();if(!org||!form.name.trim()||!form.sellingPrice)return;setSaving(true);setError('');try{await createProduct({name:form.name.trim(),sku:form.sku.trim()||null,barcode:form.barcode.trim()||null,unit:form.unit.trim()||'pcs',hsn_sac:form.hsnSac.trim()||null,purchase_price:Number(form.purchasePrice||0),selling_price:Number(form.sellingPrice),tax_rate:Number(form.taxRate||0),tax_inclusive:form.taxInclusive,stock:Number(form.stock||0),low_stock_threshold:Number(form.lowStockThreshold||0)});setForm(emptyForm);setShowForm(false);await loadProducts(org.organizationId);}catch(reason){setError(reason instanceof Error?reason.message:'Could not save product.');}finally{setSaving(false);}}
-  async function removeProduct(product:Product){if(!org||!window.confirm(`${t.removeProductConfirm}\n${product.name}`))return;try{await deleteProduct(product.id);await loadProducts(org.organizationId);}catch(reason){setError(reason instanceof Error?reason.message:'Could not remove product.');}}
+  async function addProduct(event:FormEvent){event.preventDefault();if(!org||!form.name.trim()||!form.sellingPrice)return;setSaving(true);setError('');try{await createProduct({name:form.name.trim(),sku:form.sku.trim()||null,barcode:form.barcode.trim()||null,unit:form.unit.trim()||'pcs',hsn_sac:form.hsnSac.trim()||null,purchase_price:Number(form.purchasePrice||0),selling_price:Number(form.sellingPrice),tax_rate:Number(form.taxRate||0),tax_inclusive:form.taxInclusive,stock:Number(form.stock||0),low_stock_threshold:Number(form.lowStockThreshold||0)});setForm(emptyForm);setShowForm(false);await loadProducts(org.organizationId);}catch(reason){setError(reason instanceof Error?reason.message:text('Could not save product.','उत्पाद सेव नहीं हुआ।','Product save nahi hua.'));}finally{setSaving(false);}}
+  async function removeProduct(product:Product){if(!org||!window.confirm(`${t.removeProductConfirm}\n${product.name}`))return;try{await deleteProduct(product.id);await loadProducts(org.organizationId);}catch(reason){setError(reason instanceof Error?reason.message:text('Could not remove product.','उत्पाद हटाया नहीं जा सका।','Product hataya nahi ja saka.'));}}
   if(!org)return <WorkspaceLoader/>;
   return <OwnerShell businessName={org.organizationName} language={org.preferredLanguage}>
     <PosAssist mode="product" onBatchSaved={()=>loadProducts(org.organizationId)} onConfirm={async draft=>{
-      if(draft.selling_price==null)throw new Error('Enter a price first.');
+      if(draft.selling_price==null)throw new Error(text('Enter a price first.','पहले कीमत भरें।','Pehle price bharein.'));
       await createProduct({name:draft.name,selling_price:draft.selling_price,stock:draft.stock??0,unit:draft.unit??'pcs',tax_rate:draft.tax_rate??0,tax_inclusive:draft.tax_inclusive??false});
-      try{await loadProducts(org.organizationId);}catch{setError('Product saved. Refresh to reload the catalog.');}
+      try{await loadProducts(org.organizationId);}catch{setError(text('Product saved. Refresh to reload the catalog.','उत्पाद सेव हो गया। कैटलॉग देखने के लिए पेज फिर खोलें।','Product save ho gaya. Catalog dekhne ke liye page reload karein.'));}
     }} onDraft={draft=>{setForm({...emptyForm,name:String(draft.name??''),sellingPrice:draft.selling_price==null?'':String(draft.selling_price),stock:String(draft.stock??0),unit:String(draft.unit??'pcs'),taxRate:String(draft.tax_rate??0),taxInclusive:Boolean(draft.tax_inclusive)});setShowForm(true);}}/>
     <div className="content-head pos-page-head"><div><span className="page-kicker">{t.productsKicker}</span><h1>{t.productsTitle}</h1><p>{t.productsSub}</p></div><button className="btn btn-primary" onClick={()=>setShowForm(v=>!v)}>{showForm?t.close:`+ ${t.addProduct}`}</button></div>{error&&<div className="form-error">{error}</div>}
-    {barcodeNotice.text&&<p role="status">{barcodeNotice.text} {barcodeNotice.url&&<a href={barcodeNotice.url} target="_blank" rel="noopener noreferrer">{hindi?'Product dekhein':'View source'}</a>}</p>}
+    {barcodeNotice.text&&<p role="status">{barcodeNotice.text} {barcodeNotice.url&&<a href={barcodeNotice.url} target="_blank" rel="noopener noreferrer">{text('View source','स्रोत देखें','Source dekhein')}</a>}</p>}
     {showForm&&<form className="card inline-form-panel" onSubmit={addProduct}><div className="form-panel-head"><div><h2>{t.newProduct}</h2><p>{t.newProductSub}</p></div></div><div className="grid-2">
       <div className="field"><label>{t.productName} *</label><input className="input" required value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></div>
       <div className="field"><label>{t.sellingPrice} *</label><input className="input" type="number" min="0" step="0.01" required value={form.sellingPrice} onChange={e=>setForm({...form,sellingPrice:e.target.value})}/></div>

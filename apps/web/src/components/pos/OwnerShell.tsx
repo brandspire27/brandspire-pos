@@ -2,12 +2,13 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { getFirebaseAuth } from '@/lib/firebase';
 import { clearOfflineWorkspace } from '@/lib/offline-workspace';
 import { signOut } from 'firebase/auth';
 import { clearWorkspaceCache } from '@/lib/pos';
 import { posLanguageLabel, posText, type PosLanguage } from '@/lib/pos-i18n';
+import { PosLanguageProvider, uiText } from '@/lib/pos-language';
 import { phase8Text } from '@/lib/phase8-i18n';
 import { phase9Text } from '@/lib/phase9-i18n';
 import BrandspireAssist from '@/components/pos/BrandspireAssist';
@@ -30,12 +31,14 @@ function NavIcon({ name }: { name: IconName }) {
 }
 
 function isActive(pathname: string, href: string) {
-  return href === '/owner' ? pathname === href : pathname.startsWith(href);
+  const sectionPath = pathname === '/owner/invoice' ? '/owner/invoices' : pathname;
+  return sectionPath === href || (href !== '/owner' && sectionPath.startsWith(`${href}/`));
 }
 
 export default function OwnerShell({ businessName, language = 'en', children }: Props) {
   const pathname = usePathname();
   const router = useRouter();
+  const [menuOpen, setMenuOpen] = useState(false);
   const t = posText(language);
   const p8 = phase8Text(language);
   const p9 = phase9Text(language);
@@ -61,6 +64,11 @@ export default function OwnerShell({ businessName, language = 'en', children }: 
     ['/owner/reports', t.reports, 'reports'],
     ['/owner/settings', t.settings, 'settings']
   ];
+  const currentSection = links.find(([href]) => isActive(pathname, href));
+  const sectionLabel = pathname === '/owner/invoice'
+    ? uiText(language, 'Bill receipt', 'बिल की रसीद', 'Bill ki receipt')
+    : currentSection?.[1] ?? t.ownerWorkspace;
+  const navigationLabel = uiText(language, 'Owner navigation', 'मालिक का नेविगेशन', 'Owner navigation');
 
   async function logout(){
     clearWorkspaceCache(); const uid=getFirebaseAuth().currentUser?.uid;if(uid)clearOfflineWorkspace(uid);
@@ -69,22 +77,35 @@ export default function OwnerShell({ businessName, language = 'en', children }: 
   }
 
   return (
-    <main className="dashboard pos-dashboard">
+    <PosLanguageProvider language={language}>
+    <main className="dashboard pos-dashboard" lang={language === 'hi' ? 'hi' : language === 'hinglish' ? 'hi-Latn' : 'en'}>
       <div className="dashboard-grid pos-dashboard-grid">
-        <aside className="sidebar pos-sidebar" aria-label="Owner navigation">
+        <aside className="sidebar pos-sidebar" aria-label={navigationLabel} data-menu-open={menuOpen}>
           <div>
             <div className="brand-lockup"><span className="brand-mark" aria-hidden="true">BP</span><div className="brand-copy"><strong>Brandspire POS</strong><small>{t.ownerWorkspace}</small></div></div>
+            <button className="workspace-menu-button" type="button" aria-expanded={menuOpen} aria-controls="owner-sections" onClick={()=>setMenuOpen(value=>!value)}><span aria-hidden="true">{menuOpen?'×':'☰'}</span> {uiText(language, 'All sections', 'सभी सेक्शन', 'Saare sections')}</button>
             <div className="sidebar-business"><span className="business-dot" aria-hidden="true" />{businessName}</div>
-            <nav>{links.map(([href,label,icon])=>{const active=isActive(pathname,href);return <Link key={href} aria-current={active?'page':undefined} className={active?'active':''} href={href}><span className="nav-icon"><NavIcon name={icon}/></span><span>{label}</span></Link>})}</nav>
+            <nav id="owner-sections" aria-label={navigationLabel}>{links.map(([href,label,icon])=>{const active=isActive(pathname,href);return <Link key={href} title={label} aria-label={label} aria-current={active?'page':undefined} className={active?'active':''} href={href} onClick={()=>setMenuOpen(false)}><span className="nav-icon"><NavIcon name={icon}/></span><span className="nav-label">{label}</span></Link>})}</nav>
           </div>
-          <div className="sidebar-bottom"><div className="brandspire-mini"><span>BRANDSPIRE</span><small>{t.softwareSolutions}</small></div><button className="sidebar-logout" onClick={logout}>{t.logout}</button><small>{posLanguageLabel(language)} · {t.secureWorkspace}</small></div>
+          <div className="sidebar-bottom"><div className="brandspire-mini"><span>BRANDSPIRE</span><small>{t.softwareSolutions}</small></div><button className="sidebar-logout" title={t.logout} aria-label={t.logout} onClick={logout}>{t.logout}</button><small>{posLanguageLabel(language)} · {t.secureWorkspace}</small></div>
         </aside>
-        <section className="content pos-content">{children}</section>
+        <section className="content pos-content">
+          <header className="workspace-location no-print" aria-label={uiText(language, 'Current section', 'मौजूदा पेज', 'Abhi khula page')}>
+            <span className="workspace-location-label">{uiText(language, 'You are viewing', 'आप यहाँ हैं', 'Aap yahan hain')}</span>
+            <nav aria-label={uiText(language, 'Breadcrumb', 'पेज का रास्ता', 'Page ka raasta')}>
+              <Link className="workspace-location-business" href="/owner" title={t.dashboard} aria-label={`${businessName} · ${t.dashboard}`}>{businessName}</Link>
+              <span aria-hidden="true"> / </span>
+              <strong className="workspace-location-current" aria-current="page">{sectionLabel}</strong>
+            </nav>
+          </header>
+          {children}
+        </section>
       </div>
-      <nav className="mobile-workspace-nav no-print" aria-label="Owner quick navigation">
-        {mobileLinks.map(([href,label,icon])=>{const active=isActive(pathname,href);return <Link key={href} href={href} className={active?'active':''} aria-current={active?'page':undefined}><NavIcon name={icon}/><span>{label}</span></Link>})}
+      <nav className="mobile-workspace-nav no-print" aria-label={uiText(language, 'Owner quick navigation', 'मालिक के मुख्य पेज', 'Owner ke main pages')}>
+        {mobileLinks.map(([href,label,icon])=>{const active=isActive(pathname,href);return <Link key={href} title={label} aria-label={label} href={href} className={active?'active':''} aria-current={active?'page':undefined}><NavIcon name={icon}/><span className="nav-label">{label}</span></Link>})}
       </nav>
       <BrandspireAssist language={language} role="OWNER" />
     </main>
+    </PosLanguageProvider>
   );
 }

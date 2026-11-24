@@ -10,7 +10,7 @@ data class PrinterDevice(
     val name: String,
     val transport: Transport
 ) {
-    enum class Transport { BLUETOOTH, USB }
+    enum class Transport { BLUETOOTH, USB, SC03_BLE }
 }
 
 data class PrintResult(

@@ -49,8 +49,8 @@ css.includes('prefers-reduced-motion')?out('PASS','Reduced-motion preference res
 css.includes('mobile-workspace-nav')?out('PASS','Mobile workspace navigation present'):out('WARN','Mobile quick navigation not detected');
 
 const billing=read('apps/web/src/components/pos/BillingWorkspace.tsx');
-billing.includes(".ilike('name'")&&billing.includes(".eq('barcode'")?out('PASS','Billing searches the full tenant catalog beyond initial render'):out('WARN','Billing full-catalog server search not detected');
-const initialLimit=(billing.match(/order\('name'\)\.limit\((\d+)\)/)||[])[1];
+billing.includes('listProducts(text, true, 50)')?out('PASS','Billing calls the server catalog search beyond initial render (static inspection)'):out('WARN','Billing full-catalog server search not detected');
+const initialLimit=(billing.match(/listProducts\('',\s*true,\s*(\d+)\)/)||[])[1];
 initialLimit&&Number(initialLimit)<=300?out('PASS',`Billing initial product payload capped at ${initialLimit}`):out('WARN','Billing initial product payload may be too large');
 
 const launch=read('apps/android/app/src/main/java/com/brandspire/pos/ui/LaunchDesign.kt');

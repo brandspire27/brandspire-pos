@@ -1,5 +1,7 @@
 'use client';
 
+import { localizedPaymentMethod } from '@/lib/pos-i18n';
+
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import OwnerShell from '@/components/pos/OwnerShell';
@@ -69,7 +71,7 @@ export default function ReturnsPage(){
       <aside className="card return-builder"><span className="page-kicker">{t.returnItems}</span><h2>{selected?.invoice_number??t.selectPaidInvoice}</h2>{!selected?<div className="empty-state compact">{t.chooseInvoice}</div>:<form onSubmit={issue} className="payment-form">
         <div className="return-item-list">{items.map(item=>{const already=Number(returned[item.id]??0);const remaining=Math.max(0,Number(item.quantity)-already);return <div className="return-item" key={item.id}><div><strong>{item.product_name_snapshot}</strong><small>{t.originalQty}: {item.quantity} · {t.alreadyReturned}: {already} · {t.remainingReturnable}: {remaining}</small></div><input inputMode="decimal" min="0" max={remaining} step="0.001" value={qty[item.id]??''} onChange={e=>setQty({...qty,[item.id]:e.target.value})} placeholder={t.returnQty} disabled={remaining<=0}/></div>})}</div>
         <div className="refund-estimate"><span>{t.refundEstimate}</span><strong>{formatINR(estimate)}</strong></div>
-        <label>{t.refundMethod}<select value={method} onChange={e=>setMethod(e.target.value as RefundMethod)}><option value="CASH">Cash</option><option value="UPI">UPI</option><option value="CARD">Card</option><option value="OTHER">Other</option></select></label>
+        <label>{t.refundMethod}<select value={method} onChange={e=>setMethod(e.target.value as RefundMethod)}><option value="CASH">{localizedPaymentMethod(org.preferredLanguage,'CASH')}</option><option value="UPI">{localizedPaymentMethod(org.preferredLanguage,'UPI')}</option><option value="CARD">{localizedPaymentMethod(org.preferredLanguage,'CARD')}</option><option value="OTHER">{localizedPaymentMethod(org.preferredLanguage,'OTHER')}</option></select></label>
         <label>{t.reason}<textarea rows={3} value={reason} onChange={e=>setReason(e.target.value)} placeholder={t.reasonHint}/></label>
         <div className="return-safety"><strong>{t.ownerOnly}</strong><span>{t.auditSafe}</span></div>
         <button className="btn btn-primary" disabled={saving||estimate<=0}>{saving?t.issuing:t.issueCreditNote}</button>

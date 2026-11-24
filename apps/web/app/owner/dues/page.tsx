@@ -1,5 +1,7 @@
 'use client';
 
+import { localizedPaymentMethod } from '@/lib/pos-i18n';
+
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import OwnerShell from '@/components/pos/OwnerShell';
@@ -106,7 +108,7 @@ export default function OwnerDuesPage(){
         {!selected?<div className="empty-state compact">{t.choosePendingInvoice}</div>:<form onSubmit={collectPayment} className="payment-form">
           <div className="selected-due"><span>{selected.customers?.name||t.walkInCustomer}</span><strong>{selected.invoice_number}</strong><small>{t.dueNow} · {formatINR(selected.amount_due)}</small></div>
           <label>{t.amount}<input inputMode="decimal" value={amount} onChange={(e)=>setAmount(e.target.value)} placeholder="0.00" required /></label>
-          <label>{t.paymentMethod}<select value={method} onChange={(e)=>setMethod(e.target.value as PaymentMethod)}><option value="CASH">Cash</option><option value="UPI">UPI</option><option value="CARD">Card</option><option value="OTHER">Other</option></select></label>
+          <label>{t.paymentMethod}<select value={method} onChange={(e)=>setMethod(e.target.value as PaymentMethod)}><option value="CASH">{localizedPaymentMethod(org.preferredLanguage,'CASH')}</option><option value="UPI">{localizedPaymentMethod(org.preferredLanguage,'UPI')}</option><option value="CARD">{localizedPaymentMethod(org.preferredLanguage,'CARD')}</option><option value="OTHER">{localizedPaymentMethod(org.preferredLanguage,'OTHER')}</option></select></label>
           <label>{t.note} <span className="muted">({t.optional})</span><textarea value={note} onChange={(e)=>setNote(e.target.value)} placeholder={t.notePlaceholder} rows={3}/></label>
           <button className="btn btn-primary" disabled={saving}>{saving?t.recording:t.recordPayment}</button>
           <button type="button" className="btn" onClick={()=>router.push(`/owner/invoice?id=${selected.id}`)}>{t.openInvoice}</button>

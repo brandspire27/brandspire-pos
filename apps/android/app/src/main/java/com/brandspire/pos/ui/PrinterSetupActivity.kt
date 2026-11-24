@@ -24,6 +24,7 @@ import com.brandspire.pos.printer.PrinterDevice
 import com.brandspire.pos.printer.PrinterDiscovery
 import com.brandspire.pos.printer.PrinterPreferences
 import com.brandspire.pos.printer.UsbPrinterAdapter
+import com.brandspire.pos.printer.Sc03Printer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -92,6 +93,7 @@ class PrinterSetupActivity : Activity() {
 
         status = bsText("", 11.5f, LaunchColors.muted).apply { setPadding(bsDp(2), bsDp(14), bsDp(2), 0) }
         root.addView(status)
+        root.addView(bsSecondaryButton("Find SC03 Mini Printer") { scanMini() })
         root.addView(bsSection(tx("Available printers", "Available printers", "उपलब्ध प्रिंटर")))
         list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(list)
@@ -107,8 +109,33 @@ class PrinterSetupActivity : Activity() {
     }
 
     private fun requestBluetoothPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT >= 31 && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+        if (Build.VERSION.SDK_INT >= 31 && (checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED || checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED)) {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN), 51)
+        }
+        if (Build.VERSION.SDK_INT < 31 && checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), 51)
+        }
+    }
+
+    private var scanningMini = false
+    private fun scanMini() {
+        if (scanningMini) return
+        requestBluetoothPermissionIfNeeded()
+        val allowed = if (Build.VERSION.SDK_INT >= 31)
+            checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+        else checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (!allowed) { status.text = "Allow Bluetooth permission, then tap Find SC03 again."; return }
+        scanningMini = true
+        status.text = "Searching for SC03… Keep printer on; disconnect iPrint first."
+        scope.launch {
+            try {
+                val devices = Sc03Printer.discover(this@PrinterSetupActivity)
+                val bt = (getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
+                list.removeAllViews()
+                devices.forEach { addDevice(it, bt) }
+                status.text = if (devices.isEmpty()) "No SC03 found. Check Bluetooth permission, printer power and nearby connections." else "Choose your SC03 printer below."
+            } catch (error: Exception) { status.text = error.message ?: "Scan failed" }
+            finally { scanningMini = false }
         }
     }
 
@@ -143,7 +170,7 @@ class PrinterSetupActivity : Activity() {
         val selected = current?.id == device.id
         val card = bsCard(16)
         val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        top.addView(bsIconBadge(if (device.transport == PrinterDevice.Transport.BLUETOOTH) "BT" else "USB"), LinearLayout.LayoutParams(bsDp(42), bsDp(42)).apply { marginEnd = bsDp(12) })
+        top.addView(bsIconBadge(if (device.transport != PrinterDevice.Transport.USB) "BT" else "USB"), LinearLayout.LayoutParams(bsDp(42), bsDp(42)).apply { marginEnd = bsDp(12) })
         val copy = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         copy.addView(bsText(device.name, 14.5f, LaunchColors.ink, true))
         copy.addView(bsText(device.transport.toString(), 10.5f, LaunchColors.muted).apply { setPadding(0, bsDp(3), 0, 0) })
@@ -156,21 +183,27 @@ class PrinterSetupActivity : Activity() {
 
         val choose = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; weightSum = 2f; setPadding(0, bsDp(12), 0, 0) }
         choose.addView(bsSecondaryButton(tx("Use 58mm", "58mm Use Karo", "58mm चुनें")) { saveDefault(device, PaperProfile.THERMAL_58MM) }, LinearLayout.LayoutParams(0, bsDp(44), 1f).apply { marginEnd = bsDp(5) })
-        choose.addView(bsSecondaryButton(tx("Use 80mm", "80mm Use Karo", "80mm चुनें")) { saveDefault(device, PaperProfile.THERMAL_80MM) }, LinearLayout.LayoutParams(0, bsDp(44), 1f).apply { marginStart = bsDp(5) })
+        if (device.transport != PrinterDevice.Transport.SC03_BLE) choose.addView(bsSecondaryButton(tx("Use 80mm", "80mm Use Karo", "80mm चुनें")) { saveDefault(device, PaperProfile.THERMAL_80MM) }, LinearLayout.LayoutParams(0, bsDp(44), 1f).apply { marginStart = bsDp(5) })
         card.addView(choose)
 
         val tests = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; weightSum = 2f; setPadding(0, bsDp(8), 0, 0) }
         tests.addView(bsGhostButton("Test 58mm") { test(device, PaperProfile.THERMAL_58MM, btAdapter) }, LinearLayout.LayoutParams(0, bsDp(44), 1f).apply { marginEnd = bsDp(5) })
-        tests.addView(bsGhostButton("Test 80mm") { test(device, PaperProfile.THERMAL_80MM, btAdapter) }, LinearLayout.LayoutParams(0, bsDp(44), 1f).apply { marginStart = bsDp(5) })
+        if (device.transport != PrinterDevice.Transport.SC03_BLE) tests.addView(bsGhostButton("Test 80mm") { test(device, PaperProfile.THERMAL_80MM, btAdapter) }, LinearLayout.LayoutParams(0, bsDp(44), 1f).apply { marginStart = bsDp(5) })
         card.addView(tests)
 
         list.addView(card, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = bsDp(9) })
     }
 
     private fun saveDefault(device: PrinterDevice, paper: PaperProfile) {
+        if (device.transport == PrinterDevice.Transport.SC03_BLE && paper != PaperProfile.THERMAL_58MM) {
+            status.text = "SC03 uses 58mm paper. Choose Use 58mm."
+            return
+        }
         prefs.save(device, paper)
+        render()
+        val bt = (getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
+        addDevice(device, bt)
         status.text = tx("Default saved: ${device.name} · ${paper.widthMm}mm", "Default save ho gaya: ${device.name} · ${paper.widthMm}mm", "डिफ़ॉल्ट सेव हुआ: ${device.name} · ${paper.widthMm}mm")
-        refresh()
     }
 
     private fun ensureUsbPermission(device: PrinterDevice): Boolean {
@@ -185,6 +218,15 @@ class PrinterSetupActivity : Activity() {
     }
 
     private fun test(device: PrinterDevice, paper: PaperProfile, btAdapter: android.bluetooth.BluetoothAdapter?) {
+        if (device.transport == PrinterDevice.Transport.SC03_BLE) {
+            if (paper != PaperProfile.THERMAL_58MM) { status.text = "SC03 uses 58mm paper."; return }
+            scope.launch {
+                status.text = "Sending SC03 test…"
+                val result = Sc03Printer.print(this@PrinterSetupActivity, device.id, "BSP POS - TEST\n${device.name}\nMilk 0.5 x 60 = Rs.30\nRice 1.25 x 40 = Rs.50\nTOTAL: Rs.80.00\nThank you!")
+                status.text = result.message ?: if (result.success) "Sent; check paper." else "Print failed"
+            }
+            return
+        }
         if (!ensureUsbPermission(device)) return
         status.text = tx("Connecting to ${device.name}…", "${device.name} se connect ho raha hai…", "${device.name} से कनेक्ट हो रहा है…")
         scope.launch {

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import { readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createClient } from '@libsql/client';
 import { applyMigrations } from './db-migrate.mjs';
@@ -19,21 +20,25 @@ try {
   } finally {
     console.log = originalLog;
   }
+  const versions = (await readdir(migrationsDirectory))
+    .filter(name => /^\d+_[a-z0-9_-]+\.sql$/i.test(name)).sort()
+    .map(name => name.replace(/\.sql$/i, ''));
+  assert.ok(versions.length >= 6, 'Payment recovery migrations must be present');
   assert.deepEqual(migrationLogs, [
-    'APPLIED 0001_turso_schema',
-    'APPLIED 0002_billing_auth_fields',
-    'APPLIED 0003_product_create_requests',
-    'SKIP 0001_turso_schema',
-    'SKIP 0002_billing_auth_fields',
-    'SKIP 0003_product_create_requests'
+    ...versions.map(version => `APPLIED ${version}`),
+    ...versions.map(version => `SKIP ${version}`)
   ]);
 
   const migrationCount = await client.execute('SELECT count(*) AS count FROM schema_migrations');
-  assert.equal(Number(migrationCount.rows[0].count), 3);
+  assert.equal(Number(migrationCount.rows[0].count), versions.length);
+  const checkoutColumns = await client.execute('PRAGMA table_info(subscription_checkout_sessions)');
+  for (const name of ['provider_order_id', 'term_months', 'request_payload', 'last_reconciled_at']) {
+    assert.ok(checkoutColumns.rows.some(row => row.name === name), `Missing checkout column ${name}`);
+  }
   const tables = await client.execute(
     "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
   );
-  assert.equal(Number(tables.rows[0].count), 32);
+  assert.equal(Number(tables.rows[0].count), 33);
 
   await client.execute('PRAGMA foreign_keys = ON');
   await client.execute({

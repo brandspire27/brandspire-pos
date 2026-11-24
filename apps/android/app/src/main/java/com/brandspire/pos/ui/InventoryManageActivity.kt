@@ -17,6 +17,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class InventoryManageActivity : Activity() {
+    private var mutationBusy = false
+
     private val scope = CoroutineScope(Dispatchers.Main)
     private lateinit var root: LinearLayout
     private val organizationId by lazy { intent.getStringExtra("organization_id").orEmpty() }
@@ -71,16 +73,20 @@ class InventoryManageActivity : Activity() {
     }
 
     private fun submit(productId: String, qtyField: EditText, noteField: EditText, positive: Boolean) {
+        if (mutationBusy) return
         val amount = qtyField.text.toString().toDoubleOrNull()
         if (amount == null || amount <= 0) return Toast.makeText(this, MobileText.get(language, "Enter a valid quantity.", "Valid quantity enter karo.", "वैध मात्रा दर्ज करें।"), Toast.LENGTH_SHORT).show()
         val session = SecureSessionStore(this).read() ?: return finish()
+        mutationBusy = true
         scope.launch {
             val result = withContext(Dispatchers.IO) { runCatching {
-                val api = BrandspireApiClient()
+                val api = BrandspireApiClient(this@InventoryManageActivity)
                 api.adjustProductStock(session.accessToken, organizationId, productId, if (positive) amount else -amount, noteField.text.toString())
-                OfflineDatabase(this@InventoryManageActivity).cacheProducts(organizationId, api.fetchProducts(session.accessToken, organizationId))
+                runCatching { OfflineDatabase(this@InventoryManageActivity).cacheProducts(organizationId, api.fetchProducts(session.accessToken, organizationId)) }
             } }
+            mutationBusy = false
             result.onSuccess {
+                qtyField.setText("")
                 Toast.makeText(this@InventoryManageActivity, MobileText.get(language, "Stock updated.", "Stock update ho gaya.", "स्टॉक अपडेट हो गया।"), Toast.LENGTH_SHORT).show()
                 renderProducts()
             }.onFailure { Toast.makeText(this@InventoryManageActivity, it.message ?: "Stock update failed", Toast.LENGTH_LONG).show() }

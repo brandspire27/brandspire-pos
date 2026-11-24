@@ -19,6 +19,8 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 
 class DuesPaymentsActivity : Activity() {
+    private var mutationBusy = false
+
     private val scope = CoroutineScope(Dispatchers.Main)
     private lateinit var root: LinearLayout
     private val organizationId by lazy { intent.getStringExtra("organization_id").orEmpty() }
@@ -98,9 +100,12 @@ class DuesPaymentsActivity : Activity() {
     }
 
     private fun collect(invoiceId: String, amount: Double, method: String, note: String) {
+        if (mutationBusy) return
         val session = SecureSessionStore(this).read() ?: return finish()
+        mutationBusy = true
         scope.launch {
-            val result = withContext(Dispatchers.IO) { runCatching { BrandspireApiClient().collectInvoicePayment(session.accessToken, organizationId, invoiceId, amount, method, note) } }
+            val result = withContext(Dispatchers.IO) { runCatching { BrandspireApiClient(this@DuesPaymentsActivity).collectInvoicePayment(session.accessToken, organizationId, invoiceId, amount, method, note) } }
+            mutationBusy = false
             result.onSuccess {
                 Toast.makeText(this@DuesPaymentsActivity, MobileText.get(language, "Payment recorded.", "Payment record ho gaya.", "भुगतान दर्ज हो गया।"), Toast.LENGTH_SHORT).show()
                 load()
