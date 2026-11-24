@@ -1530,3 +1530,59 @@ button { min-height: 44px; }
   .billing-step-heading { gap: 10px; }
   .billing-step-heading h2 { font-size: 16px; }
 }
+
+.android-download-shell {
+  min-height: 100vh;
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(49, 87, 213, .12), transparent 34rem),
+    #f5f7fc;
+}
+.android-download-shell .navbar { max-width: 760px; margin: 0 auto; }
+.android-download-card {
+  display: grid;
+  width: min(680px, 100%);
+  justify-items: start;
+  gap: 19px;
+  margin: 28px auto 60px;
+  padding: clamp(22px, 5vw, 42px);
+  border-color: #e2e8f2;
+  border-radius: 24px;
+  box-shadow: 0 22px 60px rgba(20, 40, 80, .09);
+}
+.android-download-badge {
+  padding: 7px 10px;
+  border: 1px solid #dce5ff;
+  border-radius: 999px;
+  background: #f3f6ff;
+  color: #3157d5;
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: .12em;
+}
+.android-download-mark {
+  display: grid;
+  width: 58px;
+  height: 58px;
+  place-items: center;
+  border-radius: 18px;
+  background: linear-gradient(145deg, #315bd6, #203eaa);
+  color: #fff;
+  font-size: 20px;
+  font-weight: 900;
+  box-shadow: 0 12px 25px rgba(49, 87, 213, .24);
+}
+.android-download-card h1 { margin: 0; color: #101828; font-size: clamp(27px, 6vw, 38px); letter-spacing: -.045em; }
+.android-download-intro { margin: 9px 0 0; color: #667085; font-size: 15px; line-height: 1.65; }
+.android-download-meta { display: flex; flex-wrap: wrap; gap: 8px; }
+.android-download-meta span { padding: 8px 11px; border: 1px solid #e6eaf1; border-radius: 999px; background: #fafbfe; color: #53617a; font-size: 12px; font-weight: 750; }
+.android-download-button { display: inline-flex; min-height: 50px; align-items: center; justify-content: center; }
+.android-install-instructions { width: 100%; padding: 16px; border-radius: 15px; background: #f7f9fd; }
+.android-install-instructions strong { color: #25324a; font-size: 13px; }
+.android-install-instructions ol { display: grid; gap: 8px; margin: 10px 0 0; padding-left: 20px; color: #667085; font-size: 12px; line-height: 1.55; }
+.android-download-warning { margin: 0; padding: 13px 15px; border: 1px solid #f3e5b7; border-radius: 13px; background: #fffbeb; color: #765914; font-size: 12px; line-height: 1.6; }
+@media (max-width: 600px) {
+  .android-download-shell { padding: 15px; }
+  .android-download-shell .navbar { padding-bottom: 8px; }
+  .android-download-card { margin-top: 15px; }
+  .android-download-button { width: 100%; }
+}

@@ -9,6 +9,7 @@ export default function HomePage() {
           <div className="brand-copy"><strong>Brandspire POS</strong><small>A Brandspire Product</small></div>
         </div>
         <div className="nav-actions">
+          <Link className="btn" href="/download">Android app</Link>
           <Link className="btn" href="/auth/login">Login</Link>
           <Link className="btn btn-primary" href="/auth/signup">Get Started</Link>
         </div>
@@ -24,6 +25,7 @@ export default function HomePage() {
           <div className="hero-actions">
             <Link className="btn btn-primary" href="/auth/signup">Start with Brandspire POS</Link>
             <Link className="btn" href="/auth/login">Login to your workspace</Link>
+            <Link className="btn" href="/download">Download Android app</Link>
           </div>
           <div className="hero-proof">
             <span>GST-ready billing</span><span>58mm · 80mm · A4</span><span>English · हिंदी · Hinglish</span>

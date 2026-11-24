@@ -37,5 +37,11 @@ bsp2.zip
 apps/android/.gradle/
 apps/android/app/build/
 
+# Android signing material
+*.jks
+*.keystore
+*.p12
+*.pfx
+
 # Firebase local deployment cache
 .firebase/

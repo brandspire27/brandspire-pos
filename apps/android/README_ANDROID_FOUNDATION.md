@@ -39,4 +39,19 @@ The Android app connects through Firebase Authentication and the Brandspire POS 
 - printer discovery UI and saved default printer
 - receipt rendering and asynchronous print jobs
 
-Set `BRANDSPIRE_FIREBASE_API_KEY` and `BRANDSPIRE_API_BASE_URL` in `apps/android/gradle.properties` (see the staging and release examples). No production claim should be made until device and offline tests pass.
+For local/debug builds, set `BRANDSPIRE_FIREBASE_API_KEY` and `BRANDSPIRE_API_BASE_URL` in `apps/android/gradle.properties` (see the staging and release examples). Release builds should use environment variables, which take priority over Gradle properties. No production claim should be made until device and offline tests pass.
+
+## Public Android preview download
+
+The public download is hosted at `/download` on Firebase Hosting; Firebase App Distribution is invite-only and is not used for this link. The APK is an early-access preview (currently version `0.4.0`, Android 8+). Bluetooth/USB printer behavior and offline operation still require testing on the target devices.
+
+Release builds must be signed with a private release keystore. Keep that keystore and its passwords backed up securely; never commit them. The Gradle release build reads these environment variables, with environment values taking priority over `gradle.properties`:
+
+- `BRANDSPIRE_FIREBASE_API_KEY`
+- `BRANDSPIRE_API_BASE_URL` (must be the production HTTPS API)
+- `BRANDSPIRE_RELEASE_KEYSTORE_FILE`
+- `BRANDSPIRE_RELEASE_STORE_PASSWORD`
+- `BRANDSPIRE_RELEASE_KEY_ALIAS`
+- `BRANDSPIRE_RELEASE_KEY_PASSWORD`
+
+Build with `.\gradlew.bat :app:assembleRelease`. After `npm run build:firebase`, place the signed APK at `apps/web/out/downloads/brandspire-pos-0.4.0.apk`, then deploy Firebase Hosting for project `bsp-pos`. Keep the version in the download page and APK filename aligned when publishing later updates. Direct APK installs do not update automatically; users need the same signing key for future updates.

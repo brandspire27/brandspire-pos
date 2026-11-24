@@ -16,7 +16,7 @@
         android:hardwareAccelerated="true"
         android:label="Brandspire POS"
         android:supportsRtl="true"
-        android:usesCleartextTraffic="true"
+        android:usesCleartextTraffic="${usesCleartextTraffic}"
         android:theme="@style/Theme.BrandspirePOS">
 
         <meta-data
