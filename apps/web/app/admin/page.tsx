@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { getFirebaseAuth } from '@/lib/firebase';
 import { signOut } from 'firebase/auth';
 import { adminDate, adminMoney, adminRequest } from '@/lib/admin-api';
+import { installationPackageName, installationPrinterType } from '@/lib/installation-api';
 
 type Application = {
   id: string;
@@ -20,6 +21,13 @@ type Application = {
   preferred_language: string;
   status: string;
   created_at: string;
+  installation_package_code: string | null;
+  installation_amount: number | null;
+  installation_payment_method: 'CASHFREE' | 'CASH_ON_INSTALLATION' | null;
+  installation_payment_status: 'CREATED' | 'DUE' | 'PAID' | 'COLLECTED' | 'CLOSED' | null;
+  installation_order_id: string | null;
+  installation_paid_at: string | null;
+  installation_collected_at: string | null;
 };
 
 type Subscription = {
@@ -82,10 +90,18 @@ function statusClass(value: string) {
   return 'admin-status';
 }
 
+function defaultDraftFor(application: Application): ApprovalDraft {
+  return {
+    ...defaultDraft,
+    printerType: installationPrinterType(application.installation_package_code)
+  };
+}
+
 export default function AdminPage() {
   const router = useRouter();
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [applications, setApplications] = useState<Application[]>([]);
+  const [installationDues, setInstallationDues] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
   const [workingId, setWorkingId] = useState('');
   const [error, setError] = useState('');
@@ -95,12 +111,14 @@ export default function AdminPage() {
     setLoading(true);
     setError('');
     try {
-      const [dashboardResponse, applicationResponse] = await Promise.all([
+      const [dashboardResponse, applicationResponse, installationDueResponse] = await Promise.all([
         adminRequest<{ success: true; data: DashboardData }>('/dashboard'),
-        adminRequest<{ success: true; data: Application[] }>('/applications?status=PENDING')
+        adminRequest<{ success: true; data: Application[] }>('/applications?status=PENDING'),
+        adminRequest<{ success: true; data: Application[] }>('/applications?status=INSTALLATION_DUE')
       ]);
       setDashboard(dashboardResponse.data);
       setApplications(applicationResponse.data ?? []);
+      setInstallationDues(installationDueResponse.data ?? []);
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : 'Could not load Brandspire Admin dashboard';
       if (message === 'ADMIN_SESSION_EXPIRED') router.push('/auth/login');
@@ -112,14 +130,17 @@ export default function AdminPage() {
 
   useEffect(() => { void load(); }, [load]);
 
-  function updateDraft(id: string, updates: Partial<ApprovalDraft>) {
-    setDrafts((current) => ({ ...current, [id]: { ...(current[id] ?? defaultDraft), ...updates } }));
+  function updateDraft(application: Application, updates: Partial<ApprovalDraft>) {
+    setDrafts((current) => ({
+      ...current,
+      [application.id]: { ...(current[application.id] ?? defaultDraftFor(application)), ...updates }
+    }));
   }
 
   async function approve(application: Application) {
     setWorkingId(application.id);
     setError('');
-    const draft = drafts[application.id] ?? defaultDraft;
+    const draft = drafts[application.id] ?? defaultDraftFor(application);
     try {
       await adminRequest(`/applications/${application.id}/approve`, {
         method: 'POST',
@@ -151,6 +172,19 @@ export default function AdminPage() {
       await load();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Rejection failed');
+    } finally {
+      setWorkingId('');
+    }
+  }
+
+  async function markInstallationCollected(application: Application) {
+    setWorkingId(application.id);
+    setError('');
+    try {
+      await adminRequest(`/applications/${application.id}/installation/collect`, { method: 'POST' });
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Cash collection could not be recorded');
     } finally {
       setWorkingId('');
     }
@@ -225,7 +259,7 @@ export default function AdminPage() {
           {applications.length === 0 ? <div className="admin-empty">No pending owner applications.</div> : (
             <div className="admin-application-grid">
               {applications.map((application) => {
-                const draft = drafts[application.id] ?? defaultDraft;
+                const draft = drafts[application.id] ?? defaultDraftFor(application);
                 return (
                   <article className="admin-application-card" key={application.id}>
                     <div className="admin-application-title"><div><h3>{application.business_name}</h3><p>{application.owner_name} · {application.email}</p></div><span className="admin-status admin-status-warn">PENDING</span></div>
@@ -233,17 +267,50 @@ export default function AdminPage() {
                       <div><b>Phone</b><span>{application.phone}</span></div><div><b>State</b><span>{application.state || '—'}</span></div>
                       <div><b>Type</b><span>{application.business_type || '—'}</span></div><div><b>GSTIN</b><span>{application.gstin || 'Not provided'}</span></div>
                       <div><b>Language</b><span>{application.preferred_language || 'en'}</span></div><div><b>Applied</b><span>{adminDate(application.created_at)}</span></div>
+                      {application.installation_package_code && <div><b>Printer package</b><span>{installationPackageName(application.installation_package_code)}</span></div>}
+                      {application.installation_amount != null && <div><b>Installation charge</b><span>{adminMoney(application.installation_amount)}</span></div>}
+                      {application.installation_payment_method && <div><b>Payment method / status</b><span>{application.installation_payment_method === 'CASHFREE' ? 'Cashfree' : 'Cash on installation'} · {application.installation_payment_status ?? 'Not paid'}</span></div>}
                     </div>
                     <div className="admin-approval-controls">
-                      <label>Access<select value={draft.accessMode} onChange={(event) => updateDraft(application.id, { accessMode: event.target.value as ApprovalDraft['accessMode'], duration: event.target.value === 'TRIAL' ? 3 : 1 })}><option value="TRIAL">Free Trial</option><option value="SUBSCRIPTION">Paid Subscription</option></select></label>
-                      <label>{draft.accessMode === 'TRIAL' ? 'Trial days' : 'Months'}<select value={draft.duration} onChange={(event) => updateDraft(application.id, { duration: Number(event.target.value) })}>{draft.accessMode === 'TRIAL' ? <><option value={3}>3 days</option><option value={7}>7 days</option><option value={14}>14 days</option></> : <><option value={1}>1 month</option><option value={3}>3 months</option><option value={6}>6 months</option><option value={12}>12 months</option></>}</select></label>
-                      <label>Printer<select value={draft.printerType} onChange={(event) => updateDraft(application.id, { printerType: event.target.value as ApprovalDraft['printerType'] })}><option value="">No printer</option><option value="THERMAL_58MM">58mm</option><option value="THERMAL_80MM">80mm</option><option value="A4">A4</option></select></label>
-                      <label>Deposit ₹<input min="0" type="number" value={draft.securityDeposit} onChange={(event) => updateDraft(application.id, { securityDeposit: Number(event.target.value) })} /></label>
+                      <label>Access<select value={draft.accessMode} onChange={(event) => updateDraft(application, { accessMode: event.target.value as ApprovalDraft['accessMode'], duration: event.target.value === 'TRIAL' ? 3 : 1 })}><option value="TRIAL">Free Trial</option><option value="SUBSCRIPTION">Paid Subscription</option></select></label>
+                      <label>{draft.accessMode === 'TRIAL' ? 'Trial days' : 'Months'}<select value={draft.duration} onChange={(event) => updateDraft(application, { duration: Number(event.target.value) })}>{draft.accessMode === 'TRIAL' ? <><option value={3}>3 days</option><option value={7}>7 days</option><option value={14}>14 days</option></> : <><option value={1}>1 month</option><option value={3}>3 months</option><option value={6}>6 months</option><option value={12}>12 months</option></>}</select></label>
+                      <label>Printer<select value={draft.printerType} disabled={Boolean(application.installation_package_code)} onChange={(event) => updateDraft(application, { printerType: event.target.value as ApprovalDraft['printerType'] })}><option value="">No printer</option><option value="THERMAL_58MM">58mm</option><option value="THERMAL_80MM">80mm</option><option value="A4">A4</option></select></label>
+                      <label>Deposit ₹<input min="0" type="number" value={draft.securityDeposit} onChange={(event) => updateDraft(application, { securityDeposit: Number(event.target.value) })} /></label>
                     </div>
-                    <div className="admin-application-actions"><button className="btn btn-danger" disabled={workingId === application.id} onClick={() => void reject(application)}>Reject</button><button className="btn btn-primary" disabled={workingId === application.id} onClick={() => void approve(application)}>{workingId === application.id ? 'Working…' : 'Approve & Activate'}</button></div>
+                    {application.installation_payment_method === 'CASHFREE' && application.installation_payment_status !== 'PAID' && <p className="admin-help">Approve is disabled until Cashfree confirms the installation charge.</p>}
+                    <div className="admin-application-actions">
+                      <button className="btn btn-danger" title={application.installation_payment_method === 'CASHFREE' && application.installation_payment_status === 'CREATED' ? 'Payment status will be checked before rejection.' : undefined} disabled={workingId === application.id || application.installation_payment_status === 'PAID' || application.installation_payment_status === 'COLLECTED'} onClick={() => void reject(application)}>Reject</button>
+                      <button className="btn btn-primary" disabled={workingId === application.id || (application.installation_payment_method === 'CASHFREE' && application.installation_payment_status !== 'PAID')} onClick={() => void approve(application)}>{workingId === application.id ? 'Working…' : 'Approve & Activate'}</button>
+                    </div>
                   </article>
                 );
               })}
+            </div>
+          )}
+        </section>
+
+        <section className="admin-panel">
+          <div className="admin-panel-head"><div><span>INSTALLATION COLLECTIONS</span><h2>Cash to collect</h2></div><b>{installationDues.length}</b></div>
+          {installationDues.length === 0 ? <div className="admin-empty">No cash-on-installation charges are due.</div> : (
+            <div className="admin-application-grid">
+              {installationDues.map(application => (
+                <article className="admin-application-card" key={application.id}>
+                  <div className="admin-application-title">
+                    <div><h3>{application.business_name}</h3><p>{application.owner_name} · {application.phone} · {application.status}</p></div>
+                    <span className="admin-status admin-status-warn">CASH DUE</span>
+                  </div>
+                  <div className="admin-application-meta">
+                    <div><b>Printer package</b><span>{installationPackageName(application.installation_package_code)}</span></div>
+                    <div><b>Amount due</b><span>{adminMoney(application.installation_amount ?? 0)}</span></div>
+                    <div><b>Applied</b><span>{adminDate(application.created_at)}</span></div>
+                  </div>
+                  <div className="admin-application-actions">
+                    <button className="btn btn-primary" disabled={workingId === application.id} onClick={() => void markInstallationCollected(application)}>
+                      {workingId === application.id ? 'Saving…' : 'Mark cash collected'}
+                    </button>
+                  </div>
+                </article>
+              ))}
             </div>
           )}
         </section>

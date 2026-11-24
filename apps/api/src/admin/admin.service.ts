@@ -2,6 +2,8 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { TursoService } from '../database/turso.service';
+import { InstallationPaymentsService } from '../payments/installation-payments.service';
+import { installationPackages } from '../payments/installation-packages';
 
 const approvalSchema = z.object({
   accessMode: z.enum(['TRIAL', 'SUBSCRIPTION']),
@@ -27,7 +29,10 @@ type SubscriptionRow = {
 
 @Injectable()
 export class AdminService {
-  constructor(private readonly database: TursoService) {}
+  constructor(
+    private readonly database: TursoService,
+    private readonly installationPayments: InstallationPaymentsService
+  ) {}
 
   private async latestSubscription(organizationId: string): Promise<SubscriptionRow | null> {
     const result = await this.database.execute(
@@ -113,12 +118,23 @@ export class AdminService {
   }
 
   async listApplications(status = 'PENDING') {
-    const normalized = ['PENDING', 'APPROVED', 'REJECTED'].includes(status) ? status : 'PENDING';
+    const normalized = ['PENDING', 'APPROVED', 'REJECTED', 'INSTALLATION_DUE'].includes(status) ? status : 'PENDING';
+    const where = normalized === 'INSTALLATION_DUE'
+      ? `a.status IN ('PENDING', 'APPROVED') AND EXISTS (
+           SELECT 1 FROM installation_checkout_sessions s
+           WHERE s.application_id = a.id AND s.provider = 'CASH_ON_INSTALLATION' AND s.status = 'DUE'
+         )`
+      : 'a.status = ?';
     const result = await this.database.execute(
-      `SELECT id, auth_user_id, email, owner_name, business_name, phone, business_type, gstin, state, address,
-        preferred_language, status, admin_note, reviewed_at, created_at
-       FROM owner_applications WHERE status = ? ORDER BY created_at DESC`,
-      [normalized]
+      `SELECT a.id, a.auth_user_id, a.email, a.owner_name, a.business_name, a.phone, a.business_type, a.gstin, a.state, a.address,
+        a.preferred_language, a.status, a.admin_note, a.reviewed_at, a.created_at, a.installation_package_code,
+        a.installation_amount, a.installation_payment_method,
+        (SELECT s.status FROM installation_checkout_sessions s WHERE s.application_id = a.id ORDER BY s.created_at DESC LIMIT 1) AS installation_payment_status,
+        (SELECT s.provider_order_id FROM installation_checkout_sessions s WHERE s.application_id = a.id ORDER BY s.created_at DESC LIMIT 1) AS installation_order_id,
+        (SELECT s.paid_at FROM installation_checkout_sessions s WHERE s.application_id = a.id ORDER BY s.created_at DESC LIMIT 1) AS installation_paid_at,
+        (SELECT s.collected_at FROM installation_checkout_sessions s WHERE s.application_id = a.id ORDER BY s.created_at DESC LIMIT 1) AS installation_collected_at
+       FROM owner_applications a WHERE ${where} ORDER BY a.created_at DESC`,
+      normalized === 'INSTALLATION_DUE' ? [] : [normalized]
     );
     return result.rows;
   }
@@ -138,8 +154,15 @@ export class AdminService {
     const application = applicationResult.rows[0] as unknown as {
       id: string; auth_user_id: string; email: string; owner_name: string; business_name: string;
       phone: string; gstin: string | null; state: string | null; address: string | null; preferred_language: string;
+      installation_payment_method: string | null; installation_package_code: string | null;
     } | undefined;
     if (!application) throw new NotFoundException('Owner application not found or already reviewed');
+    if (application.installation_payment_method === 'CASHFREE') {
+      const installationPayment = await this.installationPayments.refreshForApplication(applicationId);
+      if (installationPayment?.status !== 'PAID') {
+        throw new BadRequestException('Confirm the Cashfree installation payment before approving this application.');
+      }
+    }
     const planResult = values.accessMode === 'SUBSCRIPTION'
       ? await this.database.execute(`SELECT id FROM plans WHERE code = 'BASIC' AND active = 1 LIMIT 1`)
       : { rows: [] };
@@ -147,6 +170,9 @@ export class AdminService {
     const organizationId = randomUUID();
     const slug = `${application.business_name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 36) || 'business'}-${organizationId.slice(0, 8)}`;
     const subscriptionId = randomUUID();
+    const packagePrinterType = Object.entries(installationPackages)
+      .find(([code]) => code === application.installation_package_code)?.[1].printerType;
+    const printerType = packagePrinterType ?? values.printerType;
     await this.database.transaction(async (tx) => {
       await tx.execute({
         sql: `UPDATE owner_applications SET status = 'APPROVED', reviewed_by = ?, reviewed_at = ?, updated_at = ?
@@ -170,11 +196,11 @@ export class AdminService {
         args: [subscriptionId, organizationId, planId, values.accessMode === 'TRIAL' ? 'TRIAL' : 'ACTIVE',
           startsAt.toISOString(), endsAt.toISOString(), adminUserId, startsAt.toISOString(), values.adminMessage || null]
       });
-      if (values.printerType) {
+      if (printerType) {
         await tx.execute({
           sql: `INSERT INTO printer_assets(id, organization_id, printer_type, ownership, security_deposit, deposit_status, active)
                 VALUES (?, ?, ?, 'BRANDSPIRE', ?, ?, 1)`,
-          args: [randomUUID(), organizationId, values.printerType, values.securityDeposit, values.securityDeposit > 0 ? 'PENDING' : 'NOT_REQUIRED']
+          args: [randomUUID(), organizationId, printerType, values.securityDeposit, values.securityDeposit > 0 ? 'PENDING' : 'NOT_REQUIRED']
         });
       }
       await tx.execute({
@@ -189,12 +215,45 @@ export class AdminService {
   async reject(applicationId: string, adminUserId: string, note: string) {
     const cleanNote = z.string().trim().max(500).parse(note ?? '');
     const now = new Date().toISOString();
-    const update = await this.database.execute(
-      `UPDATE owner_applications SET status = 'REJECTED', admin_note = ?, reviewed_by = ?, reviewed_at = ?, updated_at = ?
-       WHERE id = ? AND status = 'PENDING'`,
-      [cleanNote || null, adminUserId, now, now, applicationId]
+    const application = await this.database.execute(
+      `SELECT id FROM owner_applications WHERE id = ? AND status = 'PENDING' LIMIT 1`,
+      [applicationId]
     );
-    if (update.rowsAffected === 0) throw new NotFoundException('Owner application not found or already reviewed');
+    if (!application.rows.length) throw new NotFoundException('Owner application not found or already reviewed');
+    let latestPayment = await this.database.execute(
+      `SELECT provider, provider_order_id, status FROM installation_checkout_sessions
+       WHERE application_id = ? ORDER BY created_at DESC LIMIT 1`,
+      [applicationId]
+    );
+    let payment = latestPayment.rows[0] as unknown as { provider: string; provider_order_id: string | null; status: string } | undefined;
+    if (payment?.provider === 'CASHFREE_PG' && payment.status === 'CREATED' && payment.provider_order_id) {
+      await this.installationPayments.refreshForApplication(applicationId);
+      latestPayment = await this.database.execute(
+        `SELECT provider, provider_order_id, status FROM installation_checkout_sessions
+         WHERE application_id = ? ORDER BY created_at DESC LIMIT 1`,
+        [applicationId]
+      );
+      payment = latestPayment.rows[0] as unknown as { provider: string; provider_order_id: string | null; status: string } | undefined;
+    }
+    if (payment?.status === 'PAID' || payment?.status === 'COLLECTED') {
+      throw new BadRequestException('This application has a collected installation charge. Resolve the refund before rejecting it.');
+    }
+    if (payment?.provider === 'CASHFREE_PG' && payment.status === 'CREATED' && payment.provider_order_id) {
+      throw new BadRequestException('Wait for the pending Cashfree installation payment to settle or expire before rejecting this application.');
+    }
+    await this.database.transaction(async tx => {
+      const update = await tx.execute({
+        sql: `UPDATE owner_applications SET status = 'REJECTED', admin_note = ?, reviewed_by = ?, reviewed_at = ?, updated_at = ?
+              WHERE id = ? AND status = 'PENDING'`,
+        args: [cleanNote || null, adminUserId, now, now, applicationId]
+      });
+      if (!update.rowsAffected) throw new NotFoundException('Owner application not found or already reviewed');
+      await tx.execute({
+        sql: `UPDATE installation_checkout_sessions SET status = 'CLOSED', updated_at = ?
+              WHERE application_id = ? AND status IN ('DUE', 'CREATED')`,
+        args: [now, applicationId]
+      });
+    });
     await this.writeAudit(null, adminUserId, 'OWNER_APPLICATION_REJECTED', 'OWNER_APPLICATION', applicationId, { note: cleanNote });
     return { rejected: true };
   }

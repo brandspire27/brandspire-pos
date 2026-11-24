@@ -1,11 +1,15 @@
 import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
 import { FirebaseAuthGuard, type FirebaseRequest } from '../common/firebase-auth.guard';
+import { InstallationPaymentsService } from '../payments/installation-payments.service';
 import { AuthService } from './auth.service';
 
 @Controller('auth')
 @UseGuards(FirebaseAuthGuard)
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly installationPayments: InstallationPaymentsService
+  ) {}
 
   @Get('route')
   async route(@Req() request: FirebaseRequest) {
@@ -20,5 +24,15 @@ export class AuthController {
   @Get('owner-application')
   async ownerApplication(@Req() request: FirebaseRequest) {
     return { success: true, data: await this.authService.ownerApplication(request.firebaseUid!) };
+  }
+
+  @Post('installation/checkout')
+  async installationCheckout(@Req() request: FirebaseRequest) {
+    return { success: true, data: await this.installationPayments.checkout(request.firebaseUid!) };
+  }
+
+  @Post('installation/verify')
+  async verifyInstallation(@Req() request: FirebaseRequest, @Body() body: unknown) {
+    return { success: true, data: await this.installationPayments.verify(request.firebaseUid!, body) };
   }
 }

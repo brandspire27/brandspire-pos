@@ -7,7 +7,7 @@
     "db:migrate": "node scripts/db-migrate.mjs",
     "start": "node dist/main.js",
     "lint": "echo \"api lint pending\"",
-    "test": "jest --passWithNoTests && node scripts/db-migrate-smoke.mjs"
+    "test": "jest --passWithNoTests && node scripts/db-migrate-smoke.mjs && node scripts/installation-payments-smoke.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "latest",

@@ -99,6 +99,29 @@ button { cursor: pointer; }
 .feature-item span:last-child { color: var(--muted); text-align: right; }
 .auth-wrap { min-height: 100vh; display: grid; place-items: center; padding: 26px; }
 .auth-card { width: min(760px, 100%); padding: 30px; }
+.installation-options { display:grid; gap:16px; margin-top:24px; padding:20px; border:1px solid var(--line); border-radius:16px; background:#fbfcfe; text-align:left; }
+.installation-options h2 { margin:5px 0 6px; font-size:20px; letter-spacing:-.025em; }
+.installation-options p { margin:0; color:var(--muted); font-size:13px; line-height:1.55; }
+.installation-package-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+.installation-package { display:flex; align-items:flex-start; gap:10px; min-height:72px; padding:13px; border:1px solid var(--line); border-radius:12px; background:#fff; cursor:pointer; }
+.installation-package.selected { border-color:#3157d5; box-shadow:0 0 0 3px rgba(49,87,213,.10); }
+.installation-package input,.installation-payment-methods input { margin-top:3px; accent-color:#3157d5; }
+.installation-package span,.installation-payment-methods label span { display:grid; gap:7px; }
+.installation-package strong { color:#344054; font-size:13px; line-height:1.4; }
+.installation-package b { color:#101828; font-size:16px; }
+.installation-coming-soon { display:flex; justify-content:space-between; gap:12px; padding:13px; border:1px dashed #cbd5e1; border-radius:12px; color:#667085; font-size:13px; }
+.installation-coming-soon span { font-weight:800; }
+.installation-payment-methods { display:grid; gap:10px; margin:0; padding:0; border:0; }
+.installation-payment-methods legend { margin-bottom:8px; color:#344054; font-size:13px; font-weight:800; }
+.installation-payment-methods label { display:flex; align-items:flex-start; gap:10px; padding:13px; border:1px solid var(--line); border-radius:12px; background:#fff; cursor:pointer; }
+.installation-payment-methods strong { color:#344054; font-size:13px; }
+.installation-payment-methods small { color:var(--muted); font-size:12px; line-height:1.4; }
+.installation-status { display:grid; gap:6px; margin:18px 0; padding:14px; border:1px solid var(--line); border-radius:12px; background:#f8fafc; text-align:left; }
+.installation-status strong { color:#101828; }
+.installation-status span { color:#475467; font-size:13px; }
+.installation-status + .form-success,.installation-status + .form-error { text-align:left; }
+.installation-status ~ .btn { margin:8px 4px 0; }
+@media(max-width:560px){.installation-package-grid{grid-template-columns:1fr}.installation-options{padding:15px}}
 .auth-card.narrow { width: min(500px, 100%); }
 .auth-head { margin-bottom: 25px; }
 .auth-head h1 { margin: 7px 0 8px; font-size: 34px; letter-spacing: -.035em; }

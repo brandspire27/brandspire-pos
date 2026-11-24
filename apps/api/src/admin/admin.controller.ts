@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { AdminAuthGuard } from './admin-auth.guard';
 import { AdminService } from './admin.service';
+import { InstallationPaymentsService } from '../payments/installation-payments.service';
 
 type AdminRequest = {
   adminUserId?: string;
@@ -10,7 +11,10 @@ type AdminRequest = {
 @Controller('admin')
 @UseGuards(AdminAuthGuard)
 export class AdminController {
-  constructor(private readonly adminService: AdminService) {}
+  constructor(
+    private readonly adminService: AdminService,
+    private readonly installationPayments: InstallationPaymentsService
+  ) {}
 
   @Get('me')
   me(@Req() request: AdminRequest) {
@@ -57,6 +61,14 @@ export class AdminController {
     return {
       success: true,
       data: await this.adminService.reject(id, request.adminUserId!, body.note ?? '')
+    };
+  }
+
+  @Post('applications/:id/installation/collect')
+  async collectInstallationCash(@Param('id') id: string, @Req() request: AdminRequest) {
+    return {
+      success: true,
+      data: await this.installationPayments.collectCash(id, request.adminUserId!)
     };
   }
 

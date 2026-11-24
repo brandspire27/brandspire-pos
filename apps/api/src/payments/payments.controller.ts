@@ -7,6 +7,7 @@ import { OwnerAuthGuard } from '../owner/owner-auth.guard';
 import { AdminAuthGuard } from '../admin/admin-auth.guard';
 import { CashfreeService } from './cashfree.service';
 import { CashfreeOrdersService } from './cashfree-orders.service';
+import { InstallationPaymentsService } from './installation-payments.service';
 
 type OwnerRequest = { ownerUserId?: string; organizationId?: string; ownerEmail?: string };
 type AdminRequest = { adminUserId?: string; adminEmail?: string };
@@ -182,7 +183,11 @@ export class AdminBillingController {
 
 @Controller('payments/cashfree')
 export class CashfreeWebhookController {
-  constructor(private readonly cashfree: CashfreeService, private readonly orders: CashfreeOrdersService) {}
+  constructor(
+    private readonly cashfree: CashfreeService,
+    private readonly orders: CashfreeOrdersService,
+    private readonly installationPayments: InstallationPaymentsService
+  ) {}
 
   @Post('webhook')
   @HttpCode(200)
@@ -197,7 +202,9 @@ export class CashfreeWebhookController {
       throw new BadRequestException('Invalid Cashfree webhook signature');
     }
 
-    return { success: true, ...(await this.orders.webhook(rawBody)) };
+    const subscriptionResult = await this.orders.webhook(rawBody);
+    if (!('ignored' in subscriptionResult)) return { success: true, ...subscriptionResult };
+    return { success: true, ...(await this.installationPayments.webhook(rawBody)) };
   }
 
   @Get('return')

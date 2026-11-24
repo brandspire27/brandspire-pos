@@ -32,7 +32,7 @@ try {
   const versions = (await readdir(migrationsDirectory))
     .filter(name => /^\d+_[a-z0-9_-]+\.sql$/i.test(name)).sort()
     .map(name => name.replace(/\.sql$/i, ''));
-  assert.ok(versions.length >= 6, 'Payment recovery migrations must be present');
+  assert.ok(versions.length >= 9, 'Installation checkout migration must be present');
   assert.deepEqual(migrationLogs, [
     ...versions.map(version => `APPLIED ${version}`),
     ...versions.map(version => `SKIP ${version}`)
@@ -47,7 +47,11 @@ try {
   const tables = await client.execute(
     "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
   );
-  assert.equal(Number(tables.rows[0].count), 33);
+  assert.equal(Number(tables.rows[0].count), 34);
+  const installationColumns = await client.execute('PRAGMA table_info(owner_applications)');
+  for (const name of ['installation_package_code', 'installation_amount', 'installation_payment_method']) {
+    assert.ok(installationColumns.rows.some(row => row.name === name), `Missing owner application column ${name}`);
+  }
 
   await client.execute('PRAGMA foreign_keys = ON');
   await client.execute({
