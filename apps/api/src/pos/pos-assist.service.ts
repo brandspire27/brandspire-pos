@@ -2,7 +2,7 @@ import { AiProviderException } from '../common/filters/ai-provider.exception';
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { z } from 'zod';
 import { PosService } from './pos.service';
-import { localBillLines, localProductDraft } from './local-assist';
+import { localBillLines, localProductDraft, matchSpokenProduct } from './local-assist';
 import { assistConfig } from './assist-config';
 
 const inputSchema = z.object({
@@ -13,7 +13,7 @@ const inputSchema = z.object({
 }).refine(value => value.text.length > 0 || !!value.image, 'Enter instructions or choose a photo');
 const productSchema = z.object({ name: z.string().trim().min(1).max(160), selling_price: z.number().min(0).nullable(), stock: z.number().min(0).nullable().optional(), unit: z.string().trim().min(1).max(30).nullable().optional(), tax_rate: z.number().min(0).max(100).nullable().optional(), tax_inclusive: z.boolean().nullable().optional() });
 const productBatchSchema = z.object({ products: z.array(productSchema).min(1).max(30), unresolved: z.array(z.string().max(300)).max(100) });
-const billSchema = z.object({ items: z.array(z.object({ productId: z.string().uuid(), quantity: z.number().positive().max(100000) })).min(1).max(100), unresolved: z.array(z.string().max(200)).max(100) });
+const billSchema = z.object({ items: z.array(z.object({ productId: z.string().uuid(), quantity: z.number().positive().max(100000) })).max(100), unresolved: z.array(z.string().max(200)).max(100) });
 
 @Injectable()
 export class PosAssistService {
@@ -27,28 +27,39 @@ export class PosAssistService {
       const local = localProductDraft(text);
       if (local) return batch ? {products:[local],unresolved:[],source:'local'} : { ...local, source: 'local' };
     }
+    let localBillFailure: string | null = null;
     if (!image && mode === 'bill') {
       const lines = localBillLines(text);
       if (lines) {
+        const catalog = await this.pos.listProducts(organizationId, { query: '', activeOnly: true, limit: 2000 });
         const items = new Map<string, { product: Record<string, unknown>; quantity: number }>();
         for (const line of lines) {
-          const matches = await this.pos.assistExactProducts(organizationId, line.name);
-          if (matches.length !== 1) throw new BadRequestException(`Use an exact, unique product name or SKU for "${line.name}". No items were added.`);
-          const product = matches[0];
+          const match = matchSpokenProduct(line.name, catalog);
+          if (match.status === 'ambiguous') {
+            const names = match.products.map(product => String(product.name)).join(', ');
+            localBillFailure = `I heard "${line.name}". Which product did you mean: ${names}? Say more of the name. No items were added.`;
+            break;
+          }
+          if (match.status === 'unmatched') {
+            localBillFailure = `I couldn't confidently match "${line.name}" to your catalog. Try the brand or a shorter product name. No items were added.`;
+            break;
+          }
+          const product = match.product;
           const id = String(product.id);
           const quantity = (items.get(id)?.quantity ?? 0) + line.quantity;
           if (quantity > 100000 || quantity > Number(product.stock)) throw new BadRequestException(`Insufficient stock or excessive quantity for "${line.name}". No items were added.`);
           items.set(id, { product, quantity });
         }
-        return { items: [...items.values()], source: 'local' };
+        if (!localBillFailure) return { items: [...items.values()], source: 'local' };
       }
     }
     const { key, model, baseUrl, missing } = assistConfig();
     if (missing.length) {
+      if (localBillFailure) throw new BadRequestException(localBillFailure);
       throw new BadRequestException((image
         ? 'Photo reading needs a configured AI provider. For now, type or dictate the product name and explicit price.'
         : mode === 'product' ? 'Use a name and price, for example: Milk @ 60 or Milk 60 rupees. Free-form AI is not configured.'
-        : 'Use quantities and exact catalog names or SKUs, separated by commas: 2 Milk, 1 Bread. Free-form AI is not configured.') + ` Backend settings: ${missing.join('; ')}. Save environment settings and redeploy this API.`);
+        : 'Say quantities and product names, for example: two kilos atta and one bottle oil. Close matches are supported; similar products will be shown for clarification. Free-form AI is not configured.') + ` Backend settings: ${missing.join('; ')}. Save environment settings and redeploy this API.`);
     }
     const catalog: Record<string, unknown>[] = mode === 'bill' ? await this.pos.listProducts(organizationId, { query: '', activeOnly: true, limit: 500 }) : [];
     const instruction = mode === 'product'
@@ -89,8 +100,9 @@ export class PosAssistService {
       return result.data;
     }
     const result = billSchema.safeParse(output);
-    if (!result.success) throw new BadRequestException('No unambiguous catalog products found. Try exact names or SKUs.');
+    if (!result.success) throw new BadRequestException('No unambiguous catalog products found. Try a shorter product name, brand, or SKU.');
     if (result.data.unresolved.length) throw new BadRequestException('Please clarify: ' + result.data.unresolved.join('; '));
+    if (!result.data.items.length) throw new BadRequestException('No unambiguous catalog products found. Try a shorter product name, brand, or SKU.');
     const quantities = new Map<string, number>();
     for (const item of result.data.items) quantities.set(item.productId, (quantities.get(item.productId) ?? 0) + item.quantity);
     return { items: [...quantities].map(([productId, quantity]) => {
