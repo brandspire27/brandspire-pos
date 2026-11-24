@@ -9,7 +9,6 @@ type Speech = {lang:string;onresult:((event:{results:{transcript:string}[][]})=>
 export default function CheckoutCustomer({hindi, disabled, offline=false, onCustomer, onPendingChange, storageKey}:{hindi:boolean;disabled:boolean;offline?:boolean;onCustomer:(customer:Customer)=>void;onPendingChange:(pending:boolean)=>void;storageKey:string|null}) {
   const language=usePosLanguage();
   const tr=(en:string,hi:string,hinglish:string)=>uiText(language,en,hi,hinglish);
-  const [open,setOpen]=useState(false);
   const [name,setName]=useState('');
   const [phone,setPhone]=useState('');
   const [busy,setBusy]=useState(false);
@@ -21,7 +20,7 @@ export default function CheckoutCustomer({hindi, disabled, offline=false, onCust
   const speech=useRef<Speech|null>(null);
   const inFlight=useRef(false);
   const request=useRef<{id:string;name:string;phone:string|null}|null>(null);
-  useEffect(()=>{onPendingChange(!ready||!!storageError||busy||listening||Boolean(open&&(name.trim()||phone.trim())));},[ready,storageError,busy,listening,open,name,phone,onPendingChange]);
+  useEffect(()=>{onPendingChange(!ready||!!storageError||busy||listening||Boolean(name.trim()||phone.trim()));},[ready,storageError,busy,listening,name,phone,onPendingChange]);
   useEffect(()=>()=>speech.current?.abort(),[]);
   useEffect(()=>{
     if(!storageKey)return;
@@ -30,7 +29,7 @@ export default function CheckoutCustomer({hindi, disabled, offline=false, onCust
       if(raw){
         const saved=JSON.parse(raw);
         if(typeof saved.name!=='string'||typeof saved.phone!=='string'||(saved.request&&(!/^[a-f0-9-]{36}$/i.test(saved.request.id)||typeof saved.request.name!=='string')))throw Error('Invalid customer draft');
-        setName(saved.name);setPhone(saved.phone);request.current=saved.request??null;setOpen(true);
+        setName(saved.name);setPhone(saved.phone);request.current=saved.request??null;
       }
       setReady(true);
     }catch{setStorageError(tr('Customer draft could not be restored. Keep this page open and check your customer list before retrying.','ग्राहक का अधूरा विवरण वापस नहीं खुला। पेज खुला रखें और दोबारा कोशिश से पहले ग्राहक सूची जाँचें।','Customer draft wapas nahi khula. Page khula rakhein aur dobara koshish se pehle customer list dekhein.'));}
@@ -40,7 +39,7 @@ export default function CheckoutCustomer({hindi, disabled, offline=false, onCust
     try{if(name||phone||request.current)localStorage.setItem(storageKey,JSON.stringify({name,phone,request:request.current}));else localStorage.removeItem(storageKey);setStorageError('');}
     catch{setStorageError(tr('Customer details could not be stored safely. Free device storage before saving.','ग्राहक का विवरण सुरक्षित नहीं रखा जा सका। सेव करने से पहले डिवाइस में जगह खाली करें।','Customer details surakshit nahi rakh sake. Save karne se pehle device mein jagah khaali karein.'));}
   },[ready,storageKey,name,phone,busy]);
-  function finish(customer:Customer){onCustomer(customer);request.current=null;setName('');setPhone('');setOpen(false);setMatches([]);setError('');}
+  function finish(customer:Customer){onCustomer(customer);request.current=null;setName('');setPhone('');setMatches([]);setError('');}
   function listen(field:'name'|'phone') {
     if(offline||disabled||busy)return;
     const browser=window as unknown as {SpeechRecognition?:new()=>Speech;webkitSpeechRecognition?:new()=>Speech};
@@ -79,16 +78,16 @@ export default function CheckoutCustomer({hindi, disabled, offline=false, onCust
     finally{inFlight.current=false;setBusy(false);}
   }
   return <div className="checkout-customer">
-    <button type="button" className="btn" disabled={disabled||offline||busy||listening} aria-expanded={open} onClick={()=>setOpen(true)}>+ {tr('Add customer here / speak','यहीं ग्राहक जोड़ें / बोलें','Yahin customer jodein / bolein')}</button>
     {storageError&&<p className="form-error" role="alert">{storageError}</p>}
-    {open&&<fieldset disabled={disabled||busy||!ready} style={{border:0,padding:'12px 0',margin:0}}>
+    <fieldset disabled={disabled||busy||!ready} style={{border:0,padding:'12px 0',margin:0}}>
+      <p className="muted">{tr('Optional: enter a customer name and mobile number to save and print on the bill. Leave blank for walk-in.','वैकल्पिक: बिल पर ग्राहक का नाम और मोबाइल दिखाने के लिए भरें। Walk-in के लिए खाली छोड़ें।','Optional: bill par customer name aur mobile dikhane ke liye bharein. Walk-in ke liye khaali chhodein.')}</p>
       <div className="field"><label htmlFor="checkout-customer-name">{tr('Customer name','ग्राहक का नाम','Customer ka naam')} *</label><input id="checkout-customer-name" className="input" autoComplete="name" value={name} maxLength={160} readOnly={!!request.current} onChange={e=>{setName(e.target.value);setMatches([]);}}/><button type="button" className="btn" disabled={offline||listening||!!request.current} onClick={()=>listen('name')}>🎤 {tr('Speak name','नाम बोलें','Naam bolein')}</button></div>
       <div className="field"><label htmlFor="checkout-customer-phone">{tr('Mobile number','मोबाइल नंबर','Mobile number')}</label><input id="checkout-customer-phone" className="input" type="tel" autoComplete="tel" maxLength={20} readOnly={!!request.current} value={phone} onChange={e=>{setPhone(e.target.value);setMatches([]);}}/><button type="button" className="btn" disabled={offline||listening||!!request.current} onClick={()=>listen('phone')}>🎤 {tr('Speak number','नंबर बोलें','Number bolein')}</button></div>
       {listening&&<button className="btn" type="button" onClick={()=>{speech.current?.abort();setListening(false);}}>{tr('Stop listening','सुनना रोकें','Sunna rokein')}</button>}
       <p className="muted">{offline?tr('Reconnect to save this customer, or cancel these details to continue.','ग्राहक सेव करने के लिए इंटरनेट जोड़ें, या यह विवरण रद्द करके आगे बढ़ें।','Customer save karne ke liye internet jodein, ya details radd karke aage badhein.'):tr('Check the name and number before selecting this customer.','नाम और नंबर जाँचकर ग्राहक चुनें।','Naam aur number check karke customer chunein.')}</p>
       {error&&<p className="form-error" role="alert">{error}</p>}
       {matches.length>0&&<div><p>{tr('This number already exists. Select the correct customer:','यह नंबर पहले से मौजूद है। सही ग्राहक चुनें:','Yeh number pehle se hai. Sahi customer chunein:')}</p>{matches.map(customer=><button key={customer.id} className="btn" type="button" onClick={()=>finish(customer)}>{customer.name} · {customer.phone}</button>)}</div>}
-      <div className="form-actions"><button type="button" className="btn" disabled={listening} onClick={()=>{if(request.current){setError(tr('Previous save is uncertain. Retry once with the same details before closing.','पिछली बार सेव होने की पुष्टि नहीं हुई। बंद करने से पहले उसी विवरण से दोबारा कोशिश करें।','Pichhla save confirm nahi hua. Band karne se pehle unhi details se dobara koshish karein.'));return;}setName('');setPhone('');setOpen(false);setError('');}}>{tr('Cancel','रद्द करें','Radd karein')}</button><button type="button" className="btn btn-primary" disabled={offline||listening} onClick={()=>void save()}>{busy?tr('Saving…','सेव हो रहा है…','Save ho raha hai…'):tr('Save & select customer','ग्राहक सेव करें और चुनें','Customer save karein aur chunein')}</button></div>
-    </fieldset>}
+      <div className="form-actions"><button type="button" className="btn" disabled={listening} onClick={()=>{if(request.current){setError(tr('Previous save is uncertain. Retry once with the same details before clearing.','पिछली बार सेव होने की पुष्टि नहीं हुई। विवरण हटाने से पहले उसी जानकारी से दोबारा कोशिश करें।','Pichhla save confirm nahi hua. Details clear karne se pehle unhi jaankari se dobara koshish karein.'));return;}setName('');setPhone('');setError('');}}>{tr('Clear details','विवरण हटाएँ','Details hatao')}</button><button type="button" className="btn btn-primary" disabled={offline||listening} onClick={()=>void save()}>{busy?tr('Saving…','सेव हो रहा है…','Save ho raha hai…'):tr('Save & select customer','ग्राहक सेव करें और चुनें','Customer save karein aur chunein')}</button></div>
+    </fieldset>
   </div>;
 }

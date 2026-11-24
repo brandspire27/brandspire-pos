@@ -10,14 +10,19 @@ type Characteristic = {
   writeValueWithoutResponse(value: Uint8Array): Promise<void>;
 };
 type Service = { getCharacteristics(): Promise<Characteristic[]> };
-type Device = { name?: string; gatt?: { connected: boolean; connect(): Promise<{ getPrimaryService(uuid: string): Promise<Service> }>; disconnect(): void } };
-type Bluetooth = { requestDevice(options: { filters: { namePrefix: string }[]; optionalServices: string[] }): Promise<Device> };
+type Device = { id: string; name?: string; gatt?: { connected: boolean; connect(): Promise<{ getPrimaryService(uuid: string): Promise<Service> }>; disconnect(): void } };
+type Bluetooth = {
+  requestDevice(options: { filters: { namePrefix: string }[]; optionalServices: string[] }): Promise<Device>;
+  getDevices?(): Promise<Device[]>;
+};
 const serviceId = '0000ae30-0000-1000-8000-00805f9b34fb';
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 let busy = false;
 let connection: {device:Device; writer:Characteristic} | undefined;
 let connecting: Promise<string> | undefined;
 const SPEED_KEY='bsp.sc03.speed';
+const DEVICE_KEY='bsp.sc03.device';
+let rememberedDevice: Device | undefined;
 
 export function getSc03Speed(): Sc03Speed {
   try { return localStorage.getItem(SPEED_KEY)==='compatible'?'compatible':'balanced'; } catch { return 'balanced'; }
@@ -27,6 +32,24 @@ export function setSc03Speed(speed: Sc03Speed) {
 }
 export function sc03ConnectionName(): string | null {
   return connection?.device.gatt?.connected ? connection.device.name ?? 'SC03h' : null;
+}
+function rememberDevice(device: Device) {
+  rememberedDevice=device;
+  try { localStorage.setItem(DEVICE_KEY,device.id); } catch { /* The in-memory connection remains usable. */ }
+}
+function forgetDevice(device: Device) {
+  if(rememberedDevice?.id===device.id)rememberedDevice=undefined;
+  try { if(localStorage.getItem(DEVICE_KEY)===device.id)localStorage.removeItem(DEVICE_KEY); } catch { /* A later print can still use the browser chooser. */ }
+}
+export async function prepareSc03Printer() {
+  const bluetooth=(navigator as Navigator & { bluetooth?: Bluetooth }).bluetooth;
+  if(!bluetooth?.getDevices)return;
+  const devices=await bluetooth.getDevices();
+  const matching=devices.filter(device=>/^SC03H/i.test(device.name??''));
+  let preferredId='';
+  try { preferredId=localStorage.getItem(DEVICE_KEY)??''; } catch { /* Use the only authorized SC03 device when storage is unavailable. */ }
+  const selected=matching.find(device=>device.id===preferredId)??(matching.length===1?matching[0]:undefined);
+  if(selected)rememberedDevice=selected;
 }
 export function queueSc03Print(invoiceId: string): string {
   const token=crypto.randomUUID();
@@ -44,8 +67,11 @@ export function connectSc03Printer(progress: (message:string)=>void = ()=>{}): P
   if (connecting) return connecting;
   const bluetooth = (navigator as Navigator & { bluetooth?: Bluetooth }).bluetooth;
   if (!bluetooth) return Promise.reject(new Error('SC03 printing needs Chrome/Edge on Windows or Chrome on Android. Use PDF/system printing on other browsers.'));
-  // requestDevice executes synchronously in this click before the first await.
-  const requested = bluetooth.requestDevice({ filters: [{ namePrefix: 'SC03h' }, { namePrefix: 'SC03H' }], optionalServices: [serviceId] });
+  const reconnect=rememberedDevice??connection?.device;
+  // requestDevice stays in the click path when no previously authorized device is available.
+  const requested = reconnect
+    ? Promise.resolve(reconnect)
+    : bluetooth.requestDevice({ filters: [{ namePrefix: 'SC03h' }, { namePrefix: 'SC03H' }], optionalServices: [serviceId] });
   connecting = (async()=>{
     const device=await requested;
     try {
@@ -58,9 +84,11 @@ export function connectSc03Printer(progress: (message:string)=>void = ()=>{}): P
       if (!writer?.properties.writeWithoutResponse||!notifications.length) throw new Error('This printer does not expose the expected SC03 interface.');
       for (const c of notifications) await c.startNotifications();
       connection={device,writer};
+      rememberDevice(device);
       return device.name ?? 'SC03h';
     } catch(error) {
       try { device.gatt?.disconnect(); } catch { /* preserve connection error */ }
+      forgetDevice(device);
       connection=undefined;
       throw error;
     }
@@ -98,7 +126,7 @@ export async function printSc03Receipt(lines: string[], progress: (message: stri
   options: {requireConnected?:boolean; speed?:Sc03Speed} = {}): Promise<void> {
   if (busy) throw new Error('A printer job is already running.');
   if (!sc03ConnectionName()) {
-    if (options.requireConnected) throw new Error('Bill saved. Printer connection was lost. Use the Bluetooth print button below to reconnect and print this bill.');
+    if (options.requireConnected&&!rememberedDevice&&!connection?.device) throw new Error('Bill saved. Printer connection was lost. Use the Bluetooth print button below to reconnect and print this bill.');
     await connectSc03Printer(progress);
   }
   if (busy) throw new Error('A printer job is already running.');

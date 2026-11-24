@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { printSc03Receipt, consumeSc03Print, getSc03Speed, setSc03Speed, type Sc03Speed } from '@/lib/sc03-printer';
+import { printSc03Receipt, consumeSc03Print, getSc03Speed, setSc03Speed, prepareSc03Printer, type Sc03Speed } from '@/lib/sc03-printer';
 import { useRouter } from 'next/navigation';
 import OwnerShell from '@/components/pos/OwnerShell';
 import StaffShell from '@/components/pos/StaffShell';
@@ -26,10 +26,12 @@ type Business = { name:string; phone:string|null; email:string|null; address:str
 type PrintSettings = { receiptHeader:string; receiptFooter:string; invoiceFooter:string; showGstin:boolean };
 type Props = { invoiceId:string; portal:'owner'|'staff' };
 
-function miniReceiptLines(invoice:Invoice,items:Item[],business:Business,language:PosLanguage): string[] {
+function miniReceiptLines(invoice:Invoice,items:Item[],business:Business,language:PosLanguage,receiptHeader:string,receiptFooter:string): string[] {
   const money=(n:number)=>'Rs.'+Number(n).toFixed(2);
   const t=posText(language);
-  return [business.name,invoice.invoice_number,formatDateTime(invoice.created_at),
+  const header=receiptHeader.trim();
+  const footer=receiptFooter.trim();
+  return [...(header?[header]:[]),business.name,invoice.invoice_number,formatDateTime(invoice.created_at),
     ...(invoice.status==='CANCELLED'?[localizedStatus(language,'CANCELLED')]:[]),
     invoice.customers?.name||t.walkInCustomer,
     ...(invoice.customers?.phone?[invoice.customers.phone]:[]),
@@ -40,12 +42,14 @@ function miniReceiptLines(invoice:Invoice,items:Item[],business:Business,languag
     'GST: '+money(Number(invoice.cgst)+Number(invoice.sgst)+Number(invoice.igst)),
     t.total+': '+money(invoice.grand_total),
     t.paid+': '+money(invoice.amount_paid),t.due+': '+money(invoice.amount_due),
-    t.status+': '+localizedStatus(language,invoice.payment_status),uiText(language,'Thank you!','धन्यवाद!','Dhanyavaad!')];
+    t.status+': '+localizedStatus(language,invoice.payment_status),footer||uiText(language,'Thank you!','धन्यवाद!','Dhanyavaad!')];
 }
 
 
 export default function InvoiceDetailView({ invoiceId, portal }:Props){
   const router=useRouter();
+  const returnToBilling=useCallback(()=>router.replace(portal==='owner'?'/owner/billing':'/staff/billing'),[portal,router]);
+  const returnAfterPrint=useRef(false);
   const [org,setOrg]=useState<CurrentOrganization|null>(null);
   const [invoice,setInvoice]=useState<Invoice|null>(null);
   const [items,setItems]=useState<Item[]>([]);
@@ -60,6 +64,18 @@ export default function InvoiceDetailView({ invoiceId, portal }:Props){
   const [miniStatus,setMiniStatus]=useState('');
   const [miniSpeed,setMiniSpeed]=useState<Sc03Speed>('balanced');
   useEffect(()=>setMiniSpeed(getSc03Speed()),[]);
+  useEffect(()=>{
+    const afterPrint=()=>{
+      if(!returnAfterPrint.current)return;
+      returnAfterPrint.current=false;
+      returnToBilling();
+    };
+    window.addEventListener('afterprint',afterPrint);
+    return()=>window.removeEventListener('afterprint',afterPrint);
+  },[returnToBilling]);
+  useEffect(()=>{
+    void prepareSc03Printer().catch(reason=>setMiniStatus(reason instanceof Error?reason.message:'Saved SC03 printer could not be restored. Choose it again when printing.'));
+  },[]);
   const [cancelMode,setCancelMode]=useState(false);
   const [cancelReason,setCancelReason]=useState('');
   const [cancelling,setCancelling]=useState(false);
@@ -102,6 +118,11 @@ export default function InvoiceDetailView({ invoiceId, portal }:Props){
 
   useEffect(()=>{void load();},[load]);
 
+  function printSystem() {
+    returnAfterPrint.current=true;
+    window.print();
+  }
+
   useEffect(()=>{
     if(loading||!invoice||!business||autoPrintTriggered.current===invoice.id)return;
     const params=new URLSearchParams(window.location.search);
@@ -114,7 +135,7 @@ export default function InvoiceDetailView({ invoiceId, portal }:Props){
       const url=new URL(window.location.href);
       url.searchParams.delete('autoprint');url.searchParams.delete('print_token');
       window.history.replaceState(window.history.state,'',url.toString());
-      if(mode==='1'){window.print();return;}
+      if(mode==='1'){printSystem();return;}
       try {
         if(!consumeSc03Print(invoice.id,params.get('print_token')??'')) {
           setMiniStatus(u('Bill saved. Automatic print was already used or expired. Check the paper before printing again.','बिल सेव है। अपने आप प्रिंट पहले हो चुका है या उसकी अवधि खत्म है। दोबारा प्रिंट से पहले कागज़ जाँचें।','Bill save hai. Automatic print pehle ho chuka ya expire hua. Dobara print se pehle paper check karo.'));return;
@@ -123,12 +144,20 @@ export default function InvoiceDetailView({ invoiceId, portal }:Props){
         setMiniStatus(u('Bill saved. Automatic print could not be tracked safely. Use the Bluetooth button to print once.','बिल सेव है। अपने आप प्रिंट की स्थिति नहीं मिली। एक बार प्रिंट के लिए Bluetooth बटन दबाएँ।','Bill save hai. Automatic print ka status nahi mila. Ek baar print ke liye Bluetooth button dabao.'));return;
       }
       setMiniPrinting(true);setMiniStatus(u('Sending saved bill to SC03…','सेव बिल SC03 को भेज रहे हैं…','Saved bill SC03 ko bhej rahe hain…'));
-      void printSc03Receipt(miniReceiptLines(invoice,items,business,org?.preferredLanguage??'en'),showPrinterProgress,{requireConnected:true})
-        .catch(reason=>setMiniStatus(reason instanceof Error?reason.message:u('Print failed. The bill remains saved.','प्रिंट नहीं हुआ। बिल सेव है।','Print fail hua. Bill save hai.')))
-        .finally(()=>setMiniPrinting(false));
+      void (async()=>{
+        try {
+          await prepareSc03Printer();
+          await printSc03Receipt(miniReceiptLines(invoice,items,business,org?.preferredLanguage??'en',printSettings.receiptHeader,printSettings.receiptFooter),showPrinterProgress,{requireConnected:true});
+          returnToBilling();
+        } catch(reason) {
+          setMiniStatus(reason instanceof Error?reason.message:u('Print failed. The bill remains saved.','प्रिंट नहीं हुआ। बिल सेव है।','Print fail hua. Bill save hai.'));
+        } finally {
+          setMiniPrinting(false);
+        }
+      })();
     },100);
     return ()=>window.clearTimeout(timer);
-  },[loading,invoice,items,business]);
+  },[loading,invoice,items,business,printSettings.receiptHeader,printSettings.receiptFooter,returnToBilling]);
 
   if(loading||(!org&&!error))return <WorkspaceLoader/>;
   if(error||!org||!invoice||!business)return <main className="auth-wrap"><div className="card auth-card narrow"><div className="form-error" role="alert">{error||u('Invoice not found.','बिल नहीं मिला।','Bill nahi mila.')}</div><button className="btn" onClick={()=>void load()}>{u('Try again','दोबारा कोशिश करें','Dobara try karo')}</button></div></main>;
@@ -165,10 +194,12 @@ export default function InvoiceDetailView({ invoiceId, portal }:Props){
   async function printMini() {
     if (miniPrinting) return;
     setMiniPrinting(true); setError('');
+    let printed=false;
     try {
-      await printSc03Receipt(miniReceiptLines(safeInvoice,items,safeBusiness,org?.preferredLanguage??'en'),showPrinterProgress,{speed:miniSpeed});
+      await printSc03Receipt(miniReceiptLines(safeInvoice,items,safeBusiness,org?.preferredLanguage??'en',printSettings.receiptHeader,printSettings.receiptFooter),showPrinterProgress,{speed:miniSpeed});
+      printed=true;
     } catch (error) {setMiniStatus(error instanceof Error ? error.message : u('Print failed. Your saved invoice is unchanged.','प्रिंट नहीं हुआ। आपका सेव बिल सुरक्षित है।','Print fail hua. Saved bill safe hai.'));}
-    finally {setMiniPrinting(false);}
+    finally {setMiniPrinting(false);if(printed)returnToBilling();}
   }
 
   async function cancelInvoice(){
@@ -230,7 +261,7 @@ export default function InvoiceDetailView({ invoiceId, portal }:Props){
           <aside className="card print-panel no-print">
             <span className="page-kicker">{t.printFormat}</span><h3>{t.printTitle}</h3><p>{u('Choose a paper size for system printing, or use the SC03 Bluetooth button below for your mini printer.','सिस्टम प्रिंट के लिए कागज़ का आकार चुनें। मिनी प्रिंटर के लिए नीचे SC03 Bluetooth बटन दबाएँ।','System print ke liye paper size chuno. Mini printer ke liye neeche SC03 Bluetooth button dabao.')}</p>
             <div className="print-format-list"><button className={`print-format-button ${format==='THERMAL_58MM'?'active':''}`} onClick={()=>setFormat('THERMAL_58MM')}><strong>{t.thermal2}</strong><small>{t.thermalReceipt58}</small></button><button className={`print-format-button ${format==='THERMAL_80MM'?'active':''}`} onClick={()=>setFormat('THERMAL_80MM')}><strong>{t.thermal3}</strong><small>{t.thermalReceipt80}</small></button><button className={`print-format-button ${format==='A4'?'active':''}`} onClick={()=>setFormat('A4')}><strong>{t.a4Invoice}</strong><small>{t.fullPageGstInvoice}</small></button></div>
-            <button className="btn btn-primary print-now" onClick={()=>window.print()}>{t.print} {printLabel}</button>
+            <button className="btn btn-primary print-now" onClick={printSystem}>{t.print} {printLabel}</button>
             <label htmlFor="sc03-speed">{u("SC03 print speed","SC03 प्रिंट की गति","SC03 print speed")}</label>
             <select id="sc03-speed" className="select" value={miniSpeed} disabled={miniPrinting} onChange={event=>{
               const speed=event.target.value as Sc03Speed;setMiniSpeed(speed);setSc03Speed(speed);

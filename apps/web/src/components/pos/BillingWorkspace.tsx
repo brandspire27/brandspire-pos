@@ -9,7 +9,7 @@ import PosAssist from '@/components/pos/PosAssist';
 import CheckoutCustomer from '@/components/pos/CheckoutCustomer';
 import CameraBarcodeScanner from '@/components/pos/CameraBarcodeScanner';
 import { lookupBarcodeName } from '@/lib/barcode-lookup';
-import { connectSc03Printer, queueSc03Print } from '@/lib/sc03-printer';
+import { connectSc03Printer, prepareSc03Printer, queueSc03Print } from '@/lib/sc03-printer';
 import BillingQuickAdd from '@/components/pos/BillingQuickAdd';
 import { formatINR, getCurrentOrganization, isSubscriptionUsable, type CurrentOrganization } from '@/lib/pos';
 import { createInvoice, getBillingPolicy, listCustomers, listProducts } from '@/lib/pos-api';
@@ -72,11 +72,19 @@ export default function BillingWorkspace({portal}:Props){
   const workspaceUid=useRef<string|null>(null);
   const[catalogBusy,setCatalogBusy]=useState(false);
   const[error,setError]=useState('');
+  const[printerNotice,setPrinterNotice]=useState('');
   const[success,setSuccess]=useState<{id:string;invoiceNumber:string;total:number}|null>(null);
   const [recovery,setRecovery]=useState<BillingRecovery|null>(null);
   const [recoveryReady,setRecoveryReady]=useState(false);
   const [storageError,setStorageError]=useState('');
   const recoveryStorageKey=useRef<string|null>(null);
+  useEffect(()=>{
+    let active=true;
+    void prepareSc03Printer().catch(reason=>{
+      if(active)setPrinterNotice(reason instanceof Error?reason.message:tr('Saved printer could not be restored. Select it once using Bluetooth.','सेव किया प्रिंटर वापस नहीं जुड़ा। Bluetooth से एक बार चुनें।','Saved printer restore nahi ho saka. Bluetooth se ek baar chunein.'));
+    });
+    return()=>{active=false;};
+  },[language]);
   const snapshot=():BillingRecovery=>({version:1,savedAt:Date.now(),cart,customerId,discountType,discountValue,paymentMethod,amountPaid,pendingInvoice:pendingInvoice.current});
   useEffect(()=>{
     if(!org)return;
@@ -298,7 +306,7 @@ export default function BillingWorkspace({portal}:Props){
         setError(tr("Bill is safe on this device. Confirmation is pending; sync when internet returns.","बिल इस डिवाइस पर सुरक्षित है। अभी पुष्टि बाकी है; इंटरनेट आने पर सिंक करें।","Bill is device par surakshit hai. Abhi confirmation baaki hai; internet aane par sync karein."));
         return;
       }
-      if(printAfterSave&&printTarget==='sc03')await connectSc03Printer();
+      if(printAfterSave&&printTarget==='sc03'){await connectSc03Printer();setPrinterNotice('');}
       if((await pendingBills(offlineKey)).length)throw new Error(tr("Sync pending device bills before creating an online bill so stock stays correct.","स्टॉक सही रखने के लिए ऑनलाइन बिल बनाने से पहले डिवाइस के बाकी बिल सिंक करें।","Stock sahi rakhne ke liye online bill banane se pehle device ke baaki bills sync karein."));
       const uid=getFirebaseAuth().currentUser?.uid;if(uid)clearOfflineWorkspace(uid);
       const response=await createInvoice({...input,clientInvoiceId:pendingInvoice.current.id});
@@ -374,6 +382,7 @@ export default function BillingWorkspace({portal}:Props){
         </div>
         <div className="bill-totals"><div><span>{t.taxable}</span><strong>{formatINR(estimated.base)}</strong></div><div><span>{t.discount}</span><strong>- {formatINR(estimated.discount)}</strong></div><div><span>GST</span><strong>{formatINR(estimated.tax)}</strong></div><div className="bill-grand"><span>{t.total}</span><strong>{formatINR(estimated.total)}</strong></div></div>
         <div className="field"><label htmlFor="billing-printer">{tr('Print to','प्रिंटर चुनें','Printer chunein')}</label><select id="billing-printer" className="select" value={printTarget} onChange={e=>setPrintTarget(e.target.value as 'sc03'|'system')}><option value="sc03">{tr('SC03h Bluetooth mini printer','SC03h ब्लूटूथ मिनी प्रिंटर','SC03h Bluetooth mini printer')}</option><option value="system">{tr('System printer / PDF','सिस्टम प्रिंटर / PDF','System printer / PDF')}</option></select></div>
+        {printerNotice&&<p role="status">{printerNotice}</p>}
         {customerPending&&<p role="status">{tr('Save/select the customer above before saving this bill.','बिल सेव करने से पहले ऊपर ग्राहक सेव करके चुनें।','Bill save karne se pehle upar customer save karke chunein.')}</p>}
         <div className="billing-save-actions">
           <button type="button" className="btn" style={{width:'100%'}} disabled={creating||customerPending||cart.length===0} onClick={()=>void createBill(cart,false,false)}>{creating?t.creatingBill:(tr('Save only','केवल सेव करें','Sirf save karein'))}</button>
