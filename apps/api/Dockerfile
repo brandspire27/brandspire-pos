@@ -27,4 +27,4 @@ COPY --from=build /app/apps/api/migrations ./apps/api/migrations
 
 EXPOSE 3001
 WORKDIR /app/apps/api
-CMD ["sh", "-c", "node scripts/db-migrate.mjs && exec node dist/main.js"]
+CMD ["node", "dist/main.js"]
