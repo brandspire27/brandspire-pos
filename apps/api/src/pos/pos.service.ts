@@ -29,6 +29,10 @@ const productInput = z.object({
 });
 const invoiceInput = z.object({
   customerId: z.string().uuid().nullable().optional(),
+  customerDetails: z.object({
+    name: z.string().trim().min(1).max(160),
+    phone: z.string().trim().min(1).max(30)
+  }).optional(),
   items: z.array(z.object({ productId: z.string().uuid(), quantity: z.number().positive(), expectedPrice: z.number().min(0).optional(), expectedTax: z.number().min(0).max(100).optional(), expectedInclusive: z.boolean().optional() })).min(1).max(500),
   discountType: z.enum(['PERCENT', 'FLAT']).default('PERCENT'),
   discountValue: z.number().min(0).default(0),
@@ -276,12 +280,43 @@ export class PosService {
       const row = existing.rows[0] as unknown as { id: string; invoice_number: string; grand_total: number };
       return { invoice_id: row.id, invoice_number: row.invoice_number, grand_total: row.grand_total };
     }
-    if (value.customerId) {
+    if (value.customerId && value.customerDetails) {
+      throw new BadRequestException('Select a saved customer or enter new customer details, not both');
+    }
+    let customerId = value.customerId ?? null;
+    let customerToCreate: { id: string; name: string; phone: string } | null = null;
+    let resolvedCustomerState: string | null | undefined;
+    if (value.customerDetails) {
+      const phone = value.customerDetails.phone.replace(/[\s().-]/g, '');
+      if (!/^\+?\d{7,15}$/.test(phone)) throw new BadRequestException('Check the mobile number: use 7–15 digits');
+      const comparablePhone = phone.replace(/\+/g, '');
+      const matches = await this.database.execute(
+        `SELECT id, name, state FROM customers
+         WHERE organization_id = ? AND active = 1 AND deleted_at IS NULL AND phone IS NOT NULL
+           AND replace(replace(replace(replace(replace(replace(phone, '+', ''), ' ', ''), '-', ''), '(', ''), ')', ''), '.', '') = ?`,
+        [organizationId, comparablePhone]
+      );
+      if (matches.rows.length > 1) {
+        throw new ConflictException('More than one customer uses this mobile number. Select the correct saved customer.');
+      }
+      if (matches.rows.length === 1) {
+        const existingCustomer = matches.rows[0] as unknown as { id: string; name: string; state: string | null };
+        if (existingCustomer.name.trim().toLowerCase() !== value.customerDetails.name.toLowerCase()) {
+          throw new ConflictException(`This mobile number already belongs to ${existingCustomer.name}. Select that saved customer or correct the number.`);
+        }
+        customerId = existingCustomer.id;
+        resolvedCustomerState = existingCustomer.state;
+      } else {
+        customerToCreate = { id: randomUUID(), name: value.customerDetails.name, phone };
+        customerId = customerToCreate.id;
+      }
+    } else if (customerId) {
       const customer = await this.database.execute(
-        `SELECT id FROM customers WHERE id = ? AND organization_id = ? AND active = 1 AND deleted_at IS NULL LIMIT 1`,
-        [value.customerId, organizationId]
+        `SELECT id, state FROM customers WHERE id = ? AND organization_id = ? AND active = 1 AND deleted_at IS NULL LIMIT 1`,
+        [customerId, organizationId]
       );
       if (!customer.rows.length) throw new BadRequestException('The selected customer is not available in this business');
+      resolvedCustomerState = (customer.rows[0] as unknown as { state: string | null }).state;
     }
     const settings = await this.settings(organizationId);
     if (role === 'STAFF' && value.discountValue > 0 &&
@@ -321,10 +356,7 @@ export class PosService {
     const taxAmount = lines.reduce((sum, line) => sum + line.tax, 0) * taxFactor;
     const orgInfo = await this.database.execute(`SELECT state FROM organizations WHERE id = ?`, [organizationId]);
     const orgState = String((orgInfo.rows[0] as { state?: string } | undefined)?.state ?? '').toLowerCase();
-    const customerInfo = value.customerId
-      ? await this.database.execute(`SELECT state FROM customers WHERE id = ? AND organization_id = ?`, [value.customerId, organizationId])
-      : { rows: [] };
-    const customerState = String((customerInfo.rows[0] as { state?: string } | undefined)?.state ?? orgState).toLowerCase();
+    const customerState = String(resolvedCustomerState ?? orgState).toLowerCase();
     const interstate = !!orgState && !!customerState && orgState !== customerState;
     const cgst = interstate ? 0 : taxAmount / 2;
     const sgst = interstate ? 0 : taxAmount / 2;
@@ -346,12 +378,18 @@ export class PosService {
     const invoiceNumber = `${String(settings.invoice_prefix ?? 'BSP')}-${year}-${String(Number((numberResult.rows[0] as { invoice_number?: number } | undefined)?.invoice_number ?? 1)).padStart(5, '0')}`;
     try {
       await this.database.transaction(async (tx) => {
+      if (customerToCreate) {
+        await tx.execute({
+          sql: `INSERT INTO customers(id, organization_id, name, phone, created_by) VALUES (?, ?, ?, ?, ?)`,
+          args: [customerToCreate.id, organizationId, customerToCreate.name, customerToCreate.phone, userId]
+        });
+      }
       await tx.execute({
         sql: `INSERT INTO invoices(id, organization_id, customer_id, invoice_number, client_invoice_id, created_by, created_by_role,
           status, payment_status, payment_method, subtotal, discount_type, discount_value, discount_amount, taxable_amount,
           cgst, sgst, igst, grand_total, amount_paid, amount_due, invoice_date)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        args: [invoiceId, organizationId, value.customerId ?? null, invoiceNumber, clientId, userId, role,
+        args: [invoiceId, organizationId, customerId, invoiceNumber, clientId, userId, role,
           amountDue === 0 ? 'PAID' : amountPaid > 0 ? 'PARTIALLY_PAID' : 'PENDING',
           amountDue === 0 ? 'PAID' : amountPaid > 0 ? 'PARTIALLY_PAID' : 'UNPAID',
           value.paymentMethod, subtotal, value.discountType, value.discountValue, discountAmount, taxableAmount,
@@ -393,10 +431,10 @@ export class PosService {
             args: [randomUUID(), organizationId, invoiceId, amountPaid, value.paymentMethod, userId]
           });
         }
-        if (value.customerId && amountDue > 0) {
+        if (customerId && amountDue > 0) {
           await tx.execute({
             sql: `UPDATE customers SET outstanding_balance = outstanding_balance + ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND organization_id = ?`,
-            args: [amountDue, value.customerId, organizationId]
+            args: [amountDue, customerId, organizationId]
           });
         }
       });

@@ -63,5 +63,40 @@ try {
     const count = await database.execute('SELECT count(*) AS count FROM invoices WHERE organization_id = ?', ['org']);
     assert.equal(Number(count.rows[0].count), inclusive ? 3 : 2);
   }
+  const contactProduct = await service.createProduct('org', 'owner', { name: 'Contact sale', selling_price: 20, stock: 5 });
+  const contactInvoiceInput = {
+    clientInvoiceId: randomUUID(),
+    customerDetails: { name: 'Asha Sharma', phone: '+91 98765-43210' },
+    items: [{ productId: contactProduct, quantity: 1, expectedPrice: 20, expectedTax: 0, expectedInclusive: false }]
+  };
+  const contactBill = await service.createInvoice('org', 'owner', 'OWNER', contactInvoiceInput);
+  const contactDetail = await service.invoiceDetail('org', contactBill.invoice_id);
+  assert.equal(contactDetail.invoice.customer_name, 'Asha Sharma');
+  assert.equal(contactDetail.invoice.customer_phone, '+919876543210');
+  const savedContacts = await database.execute('SELECT count(*) AS count FROM customers WHERE organization_id = ? AND phone = ?', ['org', '+919876543210']);
+  assert.equal(Number(savedContacts.rows[0].count), 1);
+  assert.deepEqual(await service.createInvoice('org', 'owner', 'OWNER', contactInvoiceInput), contactBill);
+  const repeatContactBill = await service.createInvoice('org', 'owner', 'OWNER', {
+    ...contactInvoiceInput,
+    clientInvoiceId: randomUUID(),
+    customerDetails: { name: 'Asha Sharma', phone: '919876543210' }
+  });
+  const repeatContactDetail = await service.invoiceDetail('org', repeatContactBill.invoice_id);
+  assert.equal(repeatContactDetail.invoice.customer_id, contactDetail.invoice.customer_id);
+  const unchangedContacts = await database.execute('SELECT count(*) AS count FROM customers WHERE organization_id = ? AND phone = ?', ['org', '+919876543210']);
+  assert.equal(Number(unchangedContacts.rows[0].count), 1);
+  await assert.rejects(service.createInvoice('org', 'owner', 'OWNER', {
+    ...contactInvoiceInput,
+    clientInvoiceId: randomUUID(),
+    customerDetails: { name: 'Someone Else', phone: '919876543210' }
+  }), /already belongs to Asha Sharma/);
+  const limitedProduct = await service.createProduct('org', 'owner', { name: 'Limited stock', selling_price: 10, stock: 1 });
+  await assert.rejects(service.createInvoice('org', 'owner', 'OWNER', {
+    clientInvoiceId: randomUUID(),
+    customerDetails: { name: 'Rollback Contact', phone: '9876543210' },
+    items: [{ productId: limitedProduct, quantity: 2 }]
+  }), /Insufficient stock/);
+  const rolledBackContact = await database.execute('SELECT count(*) AS count FROM customers WHERE organization_id = ? AND phone = ?', ['org', '9876543210']);
+  assert.equal(Number(rolledBackContact.rows[0].count), 0);
   console.log('POS billing passed: inclusive/exclusive GST, retries, stock rollback and staff discount policy.');
 } finally { client.close(); }

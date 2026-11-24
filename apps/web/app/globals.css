@@ -1429,3 +1429,104 @@ button { min-height: 44px; }
 .simple-billing-mode .bill-grand { font-size: 26px; }
 .simple-billing-mode :focus-visible { outline: 3px solid #1d4ed8; outline-offset: 3px; }
 @media(max-width: 600px) { .simple-billing-mode .billing-grid { display: block; } .simple-billing-mode .product-picker { max-height: 320px; } }
+
+/* Shared owner/staff workspace finish */
+.pos-dashboard, .staff-shell {
+  --primary: #3157d5;
+  --primary-hover: #2445b9;
+  --line: #e2e8f2;
+  background:
+    radial-gradient(ellipse at 86% 0%, rgba(80, 119, 225, .08), transparent 34rem),
+    #f5f7fc;
+}
+.pos-content, .staff-shell > .staff-main { min-width: 0; }
+.pos-dashboard .card, .staff-shell .card, .pos-dashboard .metric-card, .staff-shell .metric-card {
+  border-color: #e3e9f2;
+  border-radius: 20px;
+  box-shadow: 0 12px 30px rgba(20, 40, 80, .055);
+}
+.pos-dashboard .btn-primary, .staff-shell .btn-primary {
+  border-color: #3157d5;
+  background: linear-gradient(135deg, #315bd6, #2449bf);
+  box-shadow: 0 8px 18px rgba(49, 87, 213, .18);
+}
+.pos-dashboard .btn-primary:hover, .staff-shell .btn-primary:hover {
+  border-color: #2445b9;
+  background: #2445b9;
+}
+.pos-dashboard .input:focus, .pos-dashboard .select:focus, .pos-dashboard .textarea:focus,
+.staff-shell .input:focus, .staff-shell .select:focus, .staff-shell .textarea:focus {
+  border-color: #7892e8;
+  box-shadow: 0 0 0 3px rgba(49, 87, 213, .12);
+}
+.pos-dashboard :is(button, a, input, select, textarea):focus-visible,
+.staff-shell :is(button, a, input, select, textarea):focus-visible {
+  outline: 3px solid rgba(49, 87, 213, .32);
+  outline-offset: 2px;
+}
+.pos-dashboard .data-table thead th, .staff-shell .data-table thead th { background: #f7f9fd; }
+.pos-dashboard .data-table tbody tr:hover, .staff-shell .data-table tbody tr:hover { background: #f7f9ff; }
+.pos-dashboard .field label, .staff-shell .field label { color: #34425b; }
+.staff-shell .staff-topbar { border-color: #dfe6f0; }
+.staff-shell .staff-nav { background: #f1f4fa; }
+
+.billing-customer-panel { padding: 20px; margin-bottom: 16px; }
+.billing-step-heading { display: flex; align-items: flex-start; gap: 12px; }
+.billing-step-index {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 10px;
+  background: #edf2ff;
+  color: #3157d5;
+  font-size: 11px;
+  font-weight: 850;
+}
+.billing-step-heading h2 { margin: 1px 0 4px; color: #111b2e; font-size: 17px; letter-spacing: -.025em; }
+.billing-step-heading p { margin: 0; color: #738096; font-size: 12px; line-height: 1.5; }
+.billing-customer-layout { display: grid; grid-template-columns: minmax(210px, .7fr) minmax(0, 1.3fr); gap: 16px; align-items: start; margin-top: 18px; }
+.checkout-customer { min-width: 0; }
+.checkout-customer-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.checkout-customer-note { margin: 9px 0 0; color: #7a8495; font-size: 11px; line-height: 1.5; }
+.billing-products-heading { padding: 18px 16px 2px; }
+.billing-scanner-area { padding: 14px 16px 6px; }
+.billing-scanner-area > p { margin: 8px 0 0; color: #667085; font-size: 12px; }
+.billing-print-guide {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px 13px;
+  border: 1px solid #e1e8f5;
+  border-radius: 13px;
+  background: #f7f9ff;
+  color: #53617a;
+}
+.billing-print-guide-mark {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: #e8eeff;
+  color: #3157d5;
+  font-size: 12px;
+  font-weight: 850;
+}
+.billing-print-guide p { margin: 0; font-size: 11px; line-height: 1.55; }
+.billing-print-guide strong { color: #293750; font-size: 12px; }
+
+@media (max-width: 760px) {
+  .billing-customer-layout { grid-template-columns: 1fr; }
+  .billing-customer-panel { padding: 16px; }
+  .billing-products-heading { padding: 16px 14px 2px; }
+  .billing-scanner-area { padding: 12px 14px 4px; }
+}
+@media (max-width: 520px) {
+  .checkout-customer-grid { grid-template-columns: 1fr; }
+  .billing-step-heading { gap: 10px; }
+  .billing-step-heading h2 { font-size: 16px; }
+}

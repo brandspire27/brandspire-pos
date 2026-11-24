@@ -1,6 +1,7 @@
 const observed = new Map<string,string|null>();
 export type BillingRecovery = {
   version: 1; savedAt: number; cart: unknown[]; customerId: string;
+  customerDetails?: { name: string; phone: string };
   discountType: 'PERCENT' | 'FLAT'; discountValue: string;
   paymentMethod: string; amountPaid: string;
   pendingInvoice: {fingerprint:string;id:string} | null;
@@ -15,6 +16,7 @@ export function readRecovery(key:string): BillingRecovery | null {
   const value=JSON.parse(raw);
   if(value.version!==1 || !Array.isArray(value.cart) || value.cart.length>1000)throw new Error('Saved draft could not be read.');
   if(!value.cart.every((p:Record<string,unknown>)=>typeof p.id==='string' && typeof p.name==='string' && Number.isFinite(p.quantity) && Number(p.quantity)>0))throw new Error('Saved draft has invalid items.');
+  if(value.customerDetails!==undefined && (!value.customerDetails || typeof value.customerDetails.name!=='string' || typeof value.customerDetails.phone!=='string'))throw new Error('Saved customer details could not be read.');
   return value as BillingRecovery;
 }
 export function saveRecovery(key:string, value:BillingRecovery) {
